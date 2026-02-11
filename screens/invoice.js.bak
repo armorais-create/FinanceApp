@@ -1,0 +1,386 @@
+import { list, put, uid, get, deleteInvoice, deleteTransaction, updateTransaction } from "../db.js";
+
+function esc(s) {
+    return (s ?? "").toString()
+        .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;").replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+let currentCardId = "";
+let currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+
+export function setInvoiceState(cardId, month) {
+    if (cardId) currentCardId = cardId;
+    if (month) currentMonth = month;
+}
+
+export async function invoiceScreen() {
+    const cards = await list("cards");
+    const accounts = await list("accounts");
+
+    // Default selection logic
+    if (!currentCardId && cards.length > 0) currentCardId = cards[0].id;
+
+    return renderInvoiceView(cards, accounts);
+}
+
+async function renderInvoiceView(cards, accounts) {
+    if (!cards.length) return `<div class="card">Cadastre cartões primeiro na aba Config.</div>`;
+
+    // Ensure currentCardId is valid or fallback
+    if (cards.length && !cards.find(c => c.id === currentCardId)) currentCardId = cards[0].id;
+
+    const allTxs = await list("transactions");
+    const invoiceTxs = allTxs.filter(t =>
+        t.cardId === currentCardId &&
+        t.invoiceMonth === currentMonth
+    ).sort((a, b) => b.date.localeCompare(a.date));
+
+    // Stats
+    const mainExpenses = invoiceTxs.filter(t => t.cardHolder === "main" && t.type === "expense");
+    const mainPayments = invoiceTxs.filter(t => t.cardHolder === "main" && t.type === "card_payment");
+    const addExpenses = invoiceTxs.filter(t => t.cardHolder === "additional" && t.type === "expense");
+    const addPayments = invoiceTxs.filter(t => t.cardHolder === "additional" && t.type === "card_payment");
+
+    const sumVal = (arr) => arr.reduce((sum, t) => sum + t.value, 0);
+
+    const totalMainRaw = sumVal(mainExpenses);
+    const paidMain = sumVal(mainPayments);
+    const remainingMain = totalMainRaw - paidMain;
+
+    const totalAddRaw = sumVal(addExpenses);
+    const paidAdd = sumVal(addPayments);
+    const remainingAdd = totalAddRaw - paidAdd;
+
+    const totalGlobal = totalMainRaw + totalAddRaw;
+    const paidGlobal = paidMain + paidAdd;
+    const remainingGlobal = totalGlobal - paidGlobal;
+
+    const card = cards.find(c => c.id === currentCardId);
+    const currency = card?.currency || "BRL";
+
+    // Categories/People/Tags for Edit Modal
+    const categories = await list("categories");
+    const people = await list("people");
+    const tags = await list("tags");
+
+    const tagList = tags.map(t => `<option value="${esc(t.name)}">`).join("");
+
+    return `
+    <div id="invoice-view-root">
+    <!-- Header -->
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:start;">
+            <div>
+                <strong>Fatura de Cartão</strong>
+                <div class="small">Fechamento dia ${card.closingDay} · Vencimento dia ${card.dueDay}</div>
+            </div>
+            <button id="btnDeleteInvoice" class="danger small" style="padding:4px 8px;">Excluir Fatura</button>
+        </div>
+        <div class="form grid" style="margin-top:10px;">
+            <select id="invCardSelect">
+                ${cards.map(c => `<option value="${c.id}" ${c.id === currentCardId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+            </select>
+            <input id="invMonthInput" type="month" value="${currentMonth}" />
+        </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>Total Fatura</strong>
+            <div style="text-align:right">
+                <div style="font-size:1.2em; font-weight:bold;">${currency} ${remainingGlobal.toFixed(2)}</div>
+                <div class="small">Total: ${totalGlobal.toFixed(2)} · Pago: ${paidGlobal.toFixed(2)}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Holder -->
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>Titular (${esc(card.holder)})</strong>
+            <div style="text-align:right">
+                <span style="font-weight:bold">${currency} ${remainingMain.toFixed(2)}</span>
+                <span class="small"> (${totalMainRaw.toFixed(2)} - ${paidMain.toFixed(2)})</span>
+            </div>
+        </div>
+        <ul class="list">
+            ${mainExpenses.length ? mainExpenses.map(t => renderItem(t)).join("") : `<div class="small">Nenhuma compra.</div>`}
+            ${mainPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold;">Pagamentos:</div>` : ""}
+            ${mainPayments.map(t => renderItem(t, true)).join("")}
+        </ul>
+        ${remainingMain > 0.01 ? `
+        <div style="margin-top:10px; text-align:right;">
+             <button class="payBtn" data-holder="main" data-amount="${remainingMain.toFixed(2)}">Pagar Parcial (Titular)</button>
+        </div>` : ""}
+    </div>
+
+    <!-- Additional Holder -->
+    ${card.additional ? `
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>Adicional (${esc(card.additional)})</strong>
+            <div style="text-align:right">
+                <span style="font-weight:bold">${currency} ${remainingAdd.toFixed(2)}</span>
+                <span class="small"> (${totalAddRaw.toFixed(2)} - ${paidAdd.toFixed(2)})</span>
+            </div>
+        </div>
+        <ul class="list">
+            ${addExpenses.length ? addExpenses.map(t => renderItem(t)).join("") : `<div class="small">Nenhuma compra.</div>`}
+            ${addPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold;">Pagamentos:</div>` : ""}
+            ${addPayments.map(t => renderItem(t, true)).join("")}
+        </ul>
+        ${remainingAdd > 0.01 ? `
+        <div style="margin-top:10px; text-align:right;">
+             <button class="payBtn" data-holder="additional" data-amount="${remainingAdd.toFixed(2)}">Pagar Parcial (Adicional)</button>
+        </div>` : ""}
+    </div>
+    ` : ""}
+
+    <!-- Payment Modal -->
+    <dialog id="payDialog" style="padding:20px; border:1px solid #ccc; border-radius:8px; width: 90%; max-width:400px;">
+        <h3>Registrar Pagamento</h3>
+        <form id="payForm" class="form">
+            <input id="payDesc" disabled />
+            <select name="accountId" required>
+                <option value="">Pagar com conta...</option>
+                ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${a.currency})</option>`).join("")}
+            </select>
+            <input name="value" type="number" step="0.01" id="payValue" required />
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" id="cancelPay" style="background:#999">Cancelar</button>
+                <button type="submit">Confirmar Pagamento</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Edit/Delete Transaction Modal -->
+    <dialog id="editTxDialog" style="padding:20px; border:1px solid #ccc; border-radius:8px; width: 90%; max-width:400px;">
+        <h3>Editar Lançamento</h3>
+        <form id="editTxForm" class="form grid">
+            <input type="hidden" name="id" />
+            <label>Data <input type="date" name="date" required /></label>
+            <label>Descrição <input type="text" name="description" required /></label>
+            <label>Valor <input type="number" name="value" step="0.01" required /></label>
+            
+            <label>Portador 
+                <select name="cardHolder">
+                    <option value="main">Titular</option>
+                    <option value="additional">Adicional</option>
+                </select>
+            </label>
+            
+            <label>Tipo Cartão
+                <select name="cardType">
+                    <option value="fisico">Físico</option>
+                    <option value="virtual">Virtual</option>
+                </select>
+            </label>
+
+            <label>Quem Paga <select name="personId">${peopleOpts}</select></label>
+            <label>Categoria <select name="categoryId">${catOpts}</select></label>
+            <label>Tags <input type="text" name="tags" placeholder="tag1, tag2" list="editTagList"/></label>
+            <datalist id="editTagList">${tagList}</datalist>
+
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" id="cancelEdit" style="background:#999">Cancelar</button>
+                <button type="submit">Salvar</button>
+            </div>
+        </form>
+    </dialog>
+    </div><!-- End #invoice-view-root -->
+    `;
+}
+
+function renderItem(t, isPayment = false) {
+    const isUSD = t.currency === "USD";
+    const amount = Number(t.value).toFixed(2);
+    const amountBRL = t.valueBRL ? Number(t.valueBRL).toFixed(2) : amount;
+    const color = isPayment ? "green" : "black";
+    const sign = isPayment ? "-" : "";
+
+    // Store data in data attributes for Edit
+    const dataJson = esc(JSON.stringify(t));
+
+    return `
+    <li class="listItem" style="${isPayment ? 'background:#f0fff4; border-color:#bbfabb;' : ''}">
+        <div style="flex:1">
+            <strong>${esc(t.description)}</strong>
+            <div class="small">${t.date}</div>
+        </div>
+        <div style="text-align:right; color:${color}; margin-right:10px;">
+            <div>${sign} ${t.currency} ${amount}</div>
+            ${isUSD ? `<div class="small">R$ ${amountBRL}</div>` : ""}
+        </div>
+        <div style="display:flex; gap:5px;">
+            <button class="iconBtn editTxBtn" data-tx="${dataJson}">✎</button>
+            <button class="iconBtn delTxBtn danger" data-id="${t.id}">🗑</button>
+        </div>
+    </li>
+    `;
+}
+
+export async function wireInvoiceHandlers(rootEl) {
+    // 1. Refresh Handlers
+    const cardSelect = rootEl.querySelector("#invCardSelect");
+    const monthInput = rootEl.querySelector("#invMonthInput");
+    if (cardSelect) cardSelect.onchange = (e) => { currentCardId = e.target.value; refreshInvoice(rootEl); };
+    if (monthInput) monthInput.onchange = (e) => { currentMonth = e.target.value; refreshInvoice(rootEl); };
+
+    // 2. Delete Invoice
+    const delInvBtn = rootEl.querySelector("#btnDeleteInvoice");
+    if (delInvBtn) {
+        delInvBtn.onclick = async () => {
+            if (confirm("ATENÇÃO: Excluir esta fatura removerá TODOS os lançamentos e pagamentos desta competência para este cartão. Deseja continuar?")) {
+                await deleteInvoice(currentCardId, currentMonth);
+                alert("Fatura excluída.");
+                refreshInvoice(rootEl);
+            }
+        };
+    }
+
+    // 3. Edit/Delete Transactions (Delegation)
+    // 3. Edit/Delete Transactions (Delegation)
+    // CRITICAL FIX: Attach to the local container, not the persistent rootEl, to avoid duplicate listeners.
+    const container = rootEl.querySelector("#invoice-view-root");
+    if (container) {
+        container.addEventListener("click", async (e) => {
+            const btnDel = e.target.closest(".delTxBtn");
+            if (btnDel) {
+                const id = btnDel.dataset.id;
+                if (confirm("Excluir este lançamento?")) {
+                    await deleteTransaction(id);
+                    refreshInvoice(rootEl);
+                }
+                return;
+            }
+
+            const btnEdit = e.target.closest(".editTxBtn");
+            if (btnEdit) {
+                const txData = JSON.parse(btnEdit.dataset.tx);
+                openEditDialog(rootEl, txData);
+            }
+        });
+    }
+
+    // 4. Payment Logic
+    const payDialog = rootEl.querySelector("#payDialog");
+    const payForm = rootEl.querySelector("#payForm");
+
+    rootEl.querySelectorAll(".payBtn").forEach(btn => {
+        btn.onclick = () => {
+            const holder = btn.dataset.holder;
+            const amt = btn.dataset.amount;
+            const label = holder === "main" ? "Titular" : "Adicional";
+            rootEl.querySelector("#payDesc").value = `Pagamento Fatura ${currentMonth} (${label})`;
+            rootEl.querySelector("#payValue").value = amt;
+
+            // Auto-fill hidden fields or context if needed? 
+            // We need to know who we are paying for to tag correctly?
+            // Actually Payment Logic creates a NEW transaction 'card_payment'.
+            // For now, let's stick to existing logic (not refactoring Pay completely, just ensuring it works).
+            // But I need to carry over the CONTEXT (cardId, holder) to the submit form handler.
+            payForm.dataset.context = JSON.stringify({ cardId: currentCardId, holder, month: currentMonth });
+
+            payDialog.showModal();
+        }
+    });
+
+    if (payDialog) {
+        rootEl.querySelector("#cancelPay").onclick = () => payDialog.close();
+
+        payForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const fd = new FormData(payForm);
+            const ctx = JSON.parse(payForm.dataset.context || "{}");
+
+            const tx = {
+                id: uid("tx"),
+                date: new Date().toISOString().substring(0, 10),
+                description: "Pagamento Fatura",
+                value: parseFloat(fd.get("value")),
+                type: "card_payment",
+                accountId: fd.get("accountId"),
+
+                // Link to invoice
+                cardId: ctx.cardId,
+                invoiceMonth: ctx.month,
+                cardHolder: ctx.holder,
+
+                createdAt: new Date().toISOString()
+            };
+
+            await put("transactions", tx);
+            payDialog.close();
+            refreshInvoice(rootEl);
+        };
+    }
+
+    // 5. Edit Modal Logic
+    const editDialog = rootEl.querySelector("#editTxDialog");
+    const editForm = rootEl.querySelector("#editTxForm");
+
+    if (editDialog) {
+        rootEl.querySelector("#cancelEdit").onclick = () => editDialog.close();
+
+        editForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const fd = new FormData(editForm);
+            const id = fd.get("id");
+            const val = parseFloat(fd.get("value"));
+
+            // Only update fields allowed
+            const updates = {
+                date: fd.get("date"),
+                purchaseDate: fd.get("date"), // Sync purchase date
+                description: fd.get("description"),
+                value: val,
+                cardHolder: fd.get("cardHolder"),
+                personId: fd.get("personId"),
+                categoryId: fd.get("categoryId"),
+                tags: fd.get("tags") ? fd.get("tags").split(",").map(s => s.trim()) : []
+            };
+
+            // Special: if changing date significantly, should we change `invoiceMonth`?
+            // User requested: "Se o usuário editar invoiceMonth (opcional), o lançamento deve 'migrar'".
+            // But I didn't put invoiceMonth input in the modal! 
+            // The prompt says: "PARTE C ... Se o usuário editar invoiceMonth (opcional)..."
+            // For Invoice Screen, usually we keep it in the same invoice. 
+            // But valid point. Let's add invoiceMonth to edit form? 
+            // "Editar ... modal simples ... campos editáveis: purchaseDate...". It did NOT explicitly list invoiceMonth in the Modal list but hinted in migration.
+            // I'll stick to the requested fields in "PARTE B -> 4": Date, desc, amount, person, category, tags, cardMode, holder.
+            // No invoiceMonth list there. So I won't add it to Modal to avoid confusion, 
+            // unless user explicitly wants to move it. 
+            // HOWEVER, if purchaseDate changes to another month, invoiceMonth usually stays fixed (installments etc).
+
+            await updateTransaction(id, updates);
+            editDialog.close();
+            refreshInvoice(rootEl);
+        };
+    }
+}
+
+function openEditDialog(rootEl, tx) {
+    const d = rootEl.querySelector("#editTxDialog");
+    const f = rootEl.querySelector("#editTxForm");
+
+    f.querySelector("[name=id]").value = tx.id;
+    f.querySelector("[name=date]").value = tx.date;
+    f.querySelector("[name=description]").value = tx.description;
+    f.querySelector("[name=value]").value = tx.value; // what about sign? usually stored absolute for expenses.
+    f.querySelector("[name=cardHolder]").value = tx.cardHolder || "main";
+    f.querySelector("[name=personId]").value = tx.personId || "";
+    f.querySelector("[name=categoryId]").value = tx.categoryId || "";
+    f.querySelector("[name=tags]").value = (tx.tags || []).join(", ");
+
+    d.showModal();
+}
+
+async function refreshInvoice(rootEl) {
+    const cards = await list("cards");
+    const accounts = await list("accounts");
+    rootEl.innerHTML = await renderInvoiceView(cards, accounts);
+    wireInvoiceHandlers(rootEl);
+}

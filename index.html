@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FinanceApp</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="FinanceApp" />
+    <link rel="apple-touch-icon" href="icons/icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+</head>
+
+<body>
+    <header class="topbar">
+        <h1 id="title">Início</h1>
+    </header>
+
+    <main id="view" class="view"></main>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="home">Início</button>
+        <button class="tab" data-tab="tx">Lançamentos</button>
+        <button class="tab" data-tab="invoices">Faturas</button>
+        <button class="tab" data-tab="settings">Config</button>
+    </nav>
+
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.mini.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <!-- DIAGNOSTIC PANEL (Added for Freeze Debugging) -->
+    <script>
+        (function () {
+            // TOGGLE CHECK
+            const isDiag = location.search.includes("diag=1") || localStorage.getItem("diag") === "1";
+            if (!isDiag) return;
+
+            // GLOBAL STATE
+            window.__APP_READY__ = false;
+            window.__CLICK_COUNT__ = 0;
+
+            // CREATE PANEL
+            const panel = document.createElement("div");
+            panel.id = "diagnostic-panel";
+            panel.style.cssText = "position:fixed; top:0; right:0; width:300px; background:rgba(0,0,0,0.9); color:#0f0; font-family:monospace; font-size:12px; padding:10px; z-index:999999; pointer-events:auto; border-bottom-left-radius:8px; display:flex; flex-direction:column; gap:5px; box-shadow: 0 0 10px rgba(0,255,0,0.2);";
+            panel.innerHTML = `
+            <div style="border-bottom:1px solid #333; padding-bottom:5px; font-weight:bold; display:flex; justify-content:space-between;">
+                <span>DIAGNOSTIC PANEL</span>
+                <span id="btn-close-diag" style="cursor:pointer; color:#fff;">✕</span>
+            </div>
+            <div id="diag-status" style="color:yellow">Status: Waiting JS...</div>
+            <div id="diag-hash">Hash: ${location.hash}</div>
+            <div id="diag-clicks">Clicks tracked: 0</div>
+            <div id="diag-last-err" style="color:red; max-height:50px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">No errors.</div>
+            <div style="display:flex; gap:5px; margin-top:5px;">
+                <button id="btn-recover" style="background:#444; color:#fff; border:1px solid #666; cursor:pointer; padding:2px 5px;">RECUPERAR UI</button>
+                <button id="btn-reload" style="background:#444; color:#fff; border:1px solid #666; cursor:pointer; padding:2px 5px;">RECARREGAR ROTA</button>
+                <button id="btn-safe" style="background:#444; color:#fff; border:1px solid #666; cursor:pointer; padding:2px 5px;">SAFE MODE</button>
+            </div>
+            <div id="diag-msg" style="color:cyan; font-size:10px; margin-top:5px;"></div>
+        `;
+            document.body.appendChild(panel);
+
+            // CLOSE BUTTON
+            document.getElementById("btn-close-diag").onclick = () => {
+                localStorage.setItem("diag", "0");
+                panel.remove();
+                // Also remove from URL if present (without reload)
+                const url = new URL(location);
+                url.searchParams.delete("diag");
+                history.replaceState({}, "", url);
+            };
+
+            // UPDATE UI HELPER
+            const updateUI = () => {
+                const hEl = document.getElementById("diag-hash");
+                if (!hEl) return; // Removed
+                hEl.innerText = "Hash: " + location.hash;
+                document.getElementById("diag-clicks").innerText = "Clicks tracked: " + window.__CLICK_COUNT__;
+                if (window.__APP_READY__) document.getElementById("diag-status").innerHTML = "Status: <span style='color:lime'>APP READY</span>";
+            };
+            const intervalId = setInterval(updateUI, 500);
+
+            // GLOBAL LISTENERS
+            const clickHandler = (e) => {
+                window.__CLICK_COUNT__++;
+                updateUI();
+                console.log("[DIAG CLICK]", e.target);
+            };
+            document.addEventListener("click", clickHandler, true); // Capture phase!
+
+            window.addEventListener("error", (e) => {
+                const el = document.getElementById("diag-last-err");
+                if (el) el.innerText = e.message;
+            });
+            window.addEventListener("unhandledrejection", (e) => {
+                const el = document.getElementById("diag-last-err");
+                if (el) el.innerText = "Promise: " + e.reason;
+            });
+
+            // WATCHDOG
+            setTimeout(() => {
+                if (!window.__APP_READY__ && document.getElementById("diag-status")) {
+                    document.getElementById("diag-status").innerHTML = "Status: <span style='color:red'>APP NOT READY (1.5s)</span>";
+                    document.getElementById("diag-msg").innerText = "Possible 404 or Init Crash. Check Network/Console.";
+                }
+            }, 1500);
+
+            // BTN: RECOVER UI
+            document.getElementById("btn-recover").onclick = () => {
+                // 1. Remove overlays
+                const overlays = document.querySelectorAll(".modal, .backdrop, .overlay, [data-modal]");
+                overlays.forEach(el => el.remove());
+
+                // 2. Kill ghost overlays (fixed + opacity 0)
+                document.querySelectorAll("*").forEach(el => {
+                    const s = window.getComputedStyle(el);
+                    if (s.position === "fixed" && s.opacity === "0" && el !== panel) {
+                        el.style.display = "none";
+                    }
+                });
+
+                // 3. Force Pointer Events
+                document.body.style.pointerEvents = "auto";
+                document.body.classList.remove("modal-open", "no-scroll");
+
+                // 4. Reload route
+                if (window.__NAVIGATE__) window.__NAVIGATE__(location.hash);
+                else location.reload(); // Fallback
+
+                document.getElementById("diag-msg").innerText = "UI Recovery Executed.";
+            };
+
+            // BTN: RELOAD ROUTE
+            document.getElementById("btn-reload").onclick = () => {
+                if (window.__NAVIGATE__) window.__NAVIGATE__(location.hash);
+                else location.reload();
+            };
+
+            // BTN: SAFE MODE
+            document.getElementById("btn-safe").onclick = () => {
+                if (location.search.includes("safe=1")) {
+                    location.href = location.pathname + location.hash;
+                } else {
+                    location.href = location.pathname + "?safe=1" + location.hash;
+                }
+            };
+
+        })();
+    </script>
+
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,201 @@
+import { list, remove } from "./db.js";
+import { settingsScreen, wireSettingsHandlers } from "./ui.js";
+import { txScreen, wireTxHandlers } from "./screens/tx.js";
+import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
+import { importScreen, wireImportHandlers } from "./screens/import.js";
+
+const titleEl = document.getElementById("title");
+const viewEl = document.getElementById("view");
+const tabs = Array.from(document.querySelectorAll(".tab"));
+
+// =========================================
+// GLOBAL ERROR HANDLING (Circuit Breaker)
+// =========================================
+window.addEventListener("error", (e) => {
+  console.error("[GLOBAL ERROR]", e.error);
+  alert("Ocorreu um erro inesperado. Verifique o console.");
+});
+
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[UNHANDLED PROMISE]", e.reason);
+  alert("Erro de comunicação ou dados. Verifique o console.");
+});
+
+// =========================================
+// SCREENS DEFINITION
+// =========================================
+const screens = {
+  home: async () => {
+    // ... (Keep existing Home Logic, summarized for brevity in this replace but fully preserved in logic) ...
+    // Since I am replacing the whole file content block, I MUST include the full home implementation or import it.
+    // To be safe and clean, I will inline the home logic again but ensured it's robust.
+
+    try {
+      const txs = await list("transactions");
+      const cards = await list("cards");
+
+      // 1. Calculate Open Invoices
+      const invoices = {};
+      for (const t of txs) {
+        if (!t.cardId || !t.invoiceMonth) continue;
+        const key = `${t.cardId}:${t.invoiceMonth}`;
+        if (!invoices[key]) {
+          invoices[key] = { totalBRL: 0, paidBRL: 0 };
+        }
+        const val = t.valueBRL || t.value;
+        if (t.type === "card_payment") invoices[key].paidBRL += val;
+        else if (t.type === "expense") invoices[key].totalBRL += val;
+        else invoices[key].totalBRL -= val;
+      }
+
+      let openCount = 0;
+      let openTotalBRL = 0;
+      Object.values(invoices).forEach(inv => {
+        const remaining = inv.totalBRL - inv.paidBRL;
+        if (remaining > 1.0) {
+          openCount++;
+          openTotalBRL += remaining;
+        }
+      });
+
+      return `
+        <div class="card">
+        <div><strong>Resumo do mês</strong></div>
+        <div style="display:flex; justify-content:space-between; margin-top:10px;">
+            <div style="text-align:center">
+                <div style="font-size:1.5em; font-weight:bold">${openCount}</div>
+                <div class="small">Faturas Aberto</div>
+            </div>
+            <div style="text-align:center">
+                <div style="font-size:1.5em; font-weight:bold">R$ ${openTotalBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="small">Total a Pagar</div>
+            </div>
+        </div>
+        </div>
+        <div class="card">
+        <div><strong>Atalhos</strong></div>
+        <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+            <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
+            <button data-action="nav" data-hash="#invoices">Ver Faturas</button>
+            <button data-action="nav" data-hash="#import">Importar</button>
+        </div>
+        </div>
+        `;
+    } catch (e) {
+      console.error("Home Render Error", e);
+      return `<div class="card error">Erro ao carregar Home: ${e.message}</div>`;
+    }
+  },
+  tx: async () => await txScreen(),
+  invoices: async () => await invoiceScreen(),
+  import: async () => await importScreen(),
+  settings: async () => await settingsScreen(),
+};
+
+// =========================================
+// ROUTER (Single Source of Truth)
+// =========================================
+let currentTab = "";
+
+async function setTab(tabKey) {
+  if (currentTab === tabKey) {
+    // Optional: force refresh? For now, allow re-render.
+  }
+  currentTab = tabKey;
+
+  console.log("[ROUTER] Loading:", tabKey);
+
+  // UI Updates
+  tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === tabKey));
+  const label = tabs.find(b => b.dataset.tab === tabKey)?.textContent ?? "FinanceApp";
+  titleEl.textContent = label;
+
+  viewEl.innerHTML = `<div class="card"><div class="small">Carregando...</div></div>`;
+
+  try {
+    const render = screens[tabKey] || (async () => "<div class='card'>Tela não encontrada</div>");
+    const html = await render();
+    viewEl.innerHTML = html;
+    console.log("[ROUTER] Rendered HTML for:", tabKey);
+
+    // Wire Handlers (Safe Wrappers)
+    if (tabKey === "settings") await wireSettingsHandlers(viewEl);
+    else if (tabKey === "tx") await wireTxHandlers(viewEl);
+    else if (tabKey === "invoices") await wireInvoiceHandlers(viewEl);
+    else if (tabKey === "import") await wireImportHandlers(viewEl);
+
+    console.log("[ROUTER] Handlers wired for:", tabKey);
+
+  } catch (err) {
+    console.error("[ROUTER ERROR]", err);
+    viewEl.innerHTML = `
+        <div class="card" style="border-left: 5px solid red;">
+            <strong>Erro na tela!</strong><br/>
+            <p>${err.message}</p>
+            <button onclick="location.hash='#home'">Voltar Home</button>
+        </div>
+      `;
+  }
+}
+
+// =========================================
+// GLOBAL EVENTS (Delegation)
+// =========================================
+
+// 1. Click Handling (Navigation & Actions)
+document.body.addEventListener("click", async (e) => {
+  // A. Navigation (data-action="nav" or data-hash)
+  const navBtn = e.target.closest("[data-action='nav'], [data-hash]");
+  if (navBtn) {
+    // e.preventDefault(); // If it's a link?
+    const hash = navBtn.dataset.hash || navBtn.getAttribute("href");
+    if (hash) {
+      console.log("[CLICK] Navigating to", hash);
+      location.hash = hash;
+      return;
+    }
+  }
+
+  // B. Global Delete Action (data-del="store:id")
+  const delBtn = e.target.closest("[data-del]");
+  if (delBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const [store, id] = delBtn.dataset.del.split(":");
+    if (confirm("Confirmar exclusão?")) {
+      try {
+        await remove(store, id);
+        // Refresh current screen
+        setTab(currentTab);
+      } catch (err) {
+        alert("Erro ao excluir: " + err.message);
+      }
+    }
+    return;
+  }
+
+  // C. Tabs (Footer)
+  const tabBtn = e.target.closest(".tab");
+  if (tabBtn) {
+    const key = tabBtn.dataset.tab;
+    location.hash = "#" + key;
+  }
+});
+
+// 2. Hash Change
+window.addEventListener("hashchange", () => {
+  const key = (location.hash || "#home").replace("#", "");
+  if (screens[key]) setTab(key);
+  else setTab("home");
+});
+
+// 3. Initial Load
+window.addEventListener("DOMContentLoaded", () => {
+  const key = (location.hash || "#home").replace("#", "");
+  if (screens[key]) setTab(key);
+  else setTab("home");
+});
+
+// Expose helper for legacy inline clicks if needed (try to avoid)
+window.navigateTo = (key) => location.hash = key;
