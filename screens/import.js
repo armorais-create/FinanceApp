@@ -107,8 +107,9 @@ function renderDispatcher(container) {
         switch (state.step) {
             case 1: renderStep1(container); break;
             case 2: renderStep2(container); break;
-            case 3: renderStep3(container); break;
-            case 4: renderStep4(container); break;
+            case 3: renderStepBatchReview(container); break; // NEW
+            case 4: renderStepDestination(container); break; // Was Step 3
+            case 5: renderStepProcessing(container); break;  // Was Step 4
             default: container.innerHTML = "Passo desconhecido.";
         }
     } catch (e) {
@@ -285,7 +286,7 @@ function renderStep2(cnt) {
 
         <div style="margin-top:10px; display:flex; gap:10px; justify-content:flex-end;">
             <button class="backBtn" style="background:#888;">« Voltar</button>
-            <button class="nextBtn">Próximo: Destino »</button>
+            <button class="nextBtn">Próximo: Revisar em Lote »</button>
         </div>
     `;
 
@@ -454,16 +455,224 @@ function renderStep2(cnt) {
 }
 
 /* =========================================
-   STEP 3: DESTINATION
+   STEP 3: BATCH REVIEW (NEW)
    ========================================= */
 
-function renderStep3(cnt) {
+function renderStepBatchReview(cnt) {
+    const selectedCount = state.rows.filter(r => r.selected).length;
+    const totalCount = state.rows.length;
+
+    // Helper options
+    const catOpts = `<option value="">(Não Alterar)</option>` +
+        state.cache.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+
+    // Subcategories dependent on logic, will load dynamically or show all if cat not selected? 
+    // Usually batch edit for subcat requires cat. We'll disable subcat until cat selected OR show all?
+    // Let's show (Não Alterar) and if they pick a subcat, we imply the cat?
+    // Simpler: Just allow selecting category first.
+
+    const personOpts = `<option value="">(Não Alterar)</option>` +
+        state.cache.people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+
+    cnt.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>3. Revisar / Edição em Lote</h3>
+            <div class="small">
+                Selecionados: <strong>${selectedCount}</strong> / ${totalCount}
+            </div>
+        </div>
+
+        <div class="card" style="background:#f0fafe; border:1px solid #bee5eb; padding:15px; margin-top:10px;">
+            <div style="font-weight:bold; margin-bottom:10px; color:#0c5460;">Aplicar alterações nos itens selecionados:</div>
+            
+            <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap:10px;">
+                <label>Categoria
+                    <select id="batchCat">${catOpts}</select>
+                </label>
+                <label>Subcategoria
+                    <select id="batchSub" disabled><option value="">(Selecione Categoria)</option></select>
+                </label>
+                <label>Tags (Adicionar/Substituir)
+                    <input id="batchTags" placeholder="Ex: Viagem, Trabalho" />
+                </label>
+            </div>
+            
+            <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+                <label>Pessoa
+                    <select id="batchPerson">${personOpts}</select>
+                </label>
+                <label>Portador (Role)
+                    <select id="batchRole">
+                        <option value="">(Não Alterar)</option>
+                        <option value="main">Titular</option>
+                        <option value="additional">Adicional</option>
+                    </select>
+                </label>
+                <label>Tipo Cartão
+                    <select id="batchType">
+                        <option value="">(Não Alterar)</option>
+                        <option value="fisico">Físico</option>
+                        <option value="virtual">Virtual</option>
+                    </select>
+                </label>
+            </div>
+
+            <div style="margin-top:10px; text-align:right;">
+                <button id="btnBatchApply" style="background:#17a2b8; color:white;">Aplicar Alterações</button>
+            </div>
+        </div>
+
+        <p class="small" style="margin-top:10px; color:#666;">
+            Abaixo estão os itens que serão importados. Você pode voltar ao passo anterior para refinar a seleção individual.
+        </p>
+
+        <!-- Read-only List Preview (scrollable) -->
+        <div style="max-height:300px; overflow:auto; border:1px solid #ddd; background:white;">
+            <table style="width:100%; font-size:11px; border-collapse:collapse;">
+                <thead style="position:sticky; top:0; background:#eee;">
+                    <tr>
+                        <th width="30"></th>
+                        <th>Data</th>
+                        <th>Descrição</th>
+                        <th>Valor</th>
+                        <th>Cat > Sub</th>
+                        <th>Tags</th>
+                    </tr>
+                </thead>
+                <tbody id="previewBody">
+                    ${renderBatchPreviewRows()}
+                </tbody>
+            </table>
+        </div>
+
+        <div style="margin-top:20px; text-align:right; display:flex; gap:10px; justify-content:flex-end;">
+            <button class="backBtn" style="background:#888;">« Voltar (Seleção)</button>
+            <button class="nextBtn">Próximo: Destino »</button>
+        </div>
+    `;
+
+    // --- HANDLERS ---
+
+    // 1. Navigation
+    cnt.querySelector(".backBtn").onclick = () => {
+        state.step = 2;
+        renderDispatcher(cnt);
+    };
+
+    cnt.querySelector(".nextBtn").onclick = () => {
+        if (state.rows.filter(r => r.selected).length === 0) {
+            return alert("Nenhum item selecionado para importação.");
+        }
+        state.step = 4;
+        renderDispatcher(cnt);
+    };
+
+    // 2. Dynamic Subcategory
+    const batchCat = cnt.querySelector("#batchCat");
+    const batchSub = cnt.querySelector("#batchSub");
+
+    batchCat.onchange = () => {
+        const catId = batchCat.value;
+        if (!catId) {
+            batchSub.innerHTML = '<option value="">(Selecione Categoria)</option>';
+            batchSub.disabled = true;
+            return;
+        }
+        const subs = state.cache.subcategories.filter(s => s.categoryId === catId);
+        batchSub.innerHTML = `<option value="">(Não Alterar)</option>` +
+            subs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+        batchSub.disabled = false;
+    };
+
+    // 3. Apply Batch
+    cnt.querySelector("#btnBatchApply").onclick = () => {
+        const catId = batchCat.value;
+        const subId = batchSub.value;
+        const tagsVal = cnt.querySelector("#batchTags").value.trim();
+        const personId = cnt.querySelector("#batchPerson").value;
+        const role = cnt.querySelector("#batchRole").value;
+        const type = cnt.querySelector("#batchType").value;
+
+        // Validation: if user selected sub but no cat, usually UI prevents, but logic check:
+        // If cat is (Não Alterar) but sub is (Invalid).. sub is disabled so OK.
+
+        let count = 0;
+        state.rows.forEach(r => {
+            if (!r.selected) return;
+
+            if (catId) {
+                r.categoryId = catId;
+                // Only reset sub if logic dictates, but here we only apply sub if subId is set. 
+                // BUT if I change category, I SHOULD reset subcategory if it doesn't match?
+                // Yes, if I set category, old sub is invalid. 
+                // So if catId is set, we overwrite cat. 
+                // If subId is NOT set, we should probably clear sub IF it doesn't belong to new cat.
+                // For simplicity: If catId changed, clear sub unless subId is also provided.
+                if (!subId) r.subcategoryId = "";
+            }
+            if (subId) r.subcategoryId = subId; // If provided, set it.
+
+            if (tagsVal) {
+                // Feature: Replace or Append? User prompt implies "Add/Replace".
+                // Let's strictly RESET tags to strings provided for batch consistency.
+                // Or maybe append? "Adicionar/Substituir" is ambiguous.
+                // Let's assume SET.
+                r.tags = tagsVal;
+            }
+
+            if (personId) r.personId = personId; // We map this to...? Wait, step 4 uses Payer Holder.
+            // Actually Step 4 doesn't show "Person" column logic, it shows "Holder".
+            // But we have "payerRole" in Rows.
+            // And we have "personId" in Transaction Schema.
+            // Import Step 1 maps `payerRole`. 
+            // `personId` is usually for the "Responsible" field in legacy/other views.
+            // Let's support it if the rule engine or batch wants it.
+
+            if (role) r.payerRole = role;
+            if (type) r.cardType = type;
+
+            count++;
+        });
+
+        alert(`Alterações aplicadas em ${count} itens.`);
+        // Re-render list
+        cnt.querySelector("#previewBody").innerHTML = renderBatchPreviewRows();
+    };
+}
+
+function renderBatchPreviewRows() {
+    // Show only selected? Or all? 
+    // "Revisar Importação" usually implies checking what will be imported.
+    // So filter by selected.
+    return state.rows.filter(r => r.selected).slice(0, 100).map(r => {
+        const catName = state.cache.categories.find(c => c.id === r.categoryId)?.name || "-";
+        const subName = state.cache.subcategories.find(s => s.id === r.subcategoryId)?.name || "-";
+
+        return `
+            <tr style="border-bottom:1px solid #eee;">
+                <td style="text-align:center; color:green;">✔</td>
+                <td>${r.date}</td>
+                <td>${esc(r.description)}</td>
+                <td>${r.value.toFixed(2)}</td>
+                <td>${esc(catName)} > ${esc(subName)}</td>
+                <td>${esc(r.tags || "")}</td>
+            </tr>
+         `;
+    }).join("") + (state.rows.filter(r => r.selected).length > 100 ? '<tr><td colspan="6" style="text-align:center; color:#999;">...e mais itens...</td></tr>' : '');
+}
+
+/* =========================================
+   STEP 4: DESTINATION (Renamed from Step 3)
+   ========================================= */
+
+function renderStepDestination(cnt) {
     // Totals
     const selected = state.rows.filter(r => r.selected);
     const totalVal = selected.reduce((sum, r) => sum + r.value, 0);
 
     cnt.innerHTML = `
-        <h3>3. Destino da Importação</h3>
+    cnt.innerHTML = `
+        < h3 > 4. Destino da Importação</h3 >
         <p>Você selecionou <strong>${selected.length}</strong> transações.</p>
         <p>Valor Total: <strong style="${totalVal < 0 ? 'color:red' : 'color:green'}">R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
 
@@ -500,7 +709,10 @@ function renderStep3(cnt) {
         state.dest.cardId = cnt.querySelector("#dstCard").value;
         state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
         state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
-        state.step = 2;
+        state.dest.cardId = cnt.querySelector("#dstCard").value;
+        state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
+        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+        state.step = 3; // Go back to Batch Review
         renderDispatcher(cnt);
     };
 
@@ -514,18 +726,22 @@ function renderStep3(cnt) {
         state.dest.invoiceMonth = mon;
         state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
 
-        state.step = 4;
+        state.dest.cardId = cardId;
+        state.dest.invoiceMonth = mon;
+        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+
+        state.step = 5; // Go to Processing
         renderDispatcher(cnt);
     };
 }
 
 /* =========================================
-   STEP 4: PROCESSING
+   STEP 5: PROCESSING (Renamed from Step 4)
    ========================================= */
 
-function renderStep4(cnt) {
+function renderStepProcessing(cnt) {
     cnt.innerHTML = `
-        <h3>4. Processando...</h3>
+        < h3 > 5. Processando...</h3 >
         <p>Salvando transações no banco de dados.</p>
         <div style="width:100%; background:#eee; height:20px; border-radius:10px; overflow:hidden;">
             <div id="progBar" style="width:0%; background:#007bff; height:100%; transition:width 0.2s;"></div>
@@ -597,23 +813,23 @@ async function startImportProcess(cnt) {
         processed += chunk.length;
         const pct = Math.round((processed / total) * 100);
         progBar.style.width = pct + "%";
-        progText.textContent = `${processed}/${total}`;
+        progText.textContent = `${ processed }/${total}`;
 
-        // Yield to UI
-        await new Promise(r => setTimeout(r, 10));
-    }
+    // Yield to UI
+    await new Promise(r => setTimeout(r, 10));
+}
 
-    // Finish
-    progBar.style.width = "100%";
-    progText.textContent = "Concluído!";
-    finalMsg.style.display = "block";
+// Finish
+progBar.style.width = "100%";
+progText.textContent = "Concluído!";
+finalMsg.style.display = "block";
 
-    // Update Invoice State (Circuit Breaker pattern - safe update)
-    try {
-        setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
-    } catch (e) { console.warn("Invoice update warning", e); }
+// Update Invoice State (Circuit Breaker pattern - safe update)
+try {
+    setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
+} catch (e) { console.warn("Invoice update warning", e); }
 
-    btnFinish.onclick = () => {
-        location.hash = "#invoices";
-    };
+btnFinish.onclick = () => {
+    location.hash = "#invoices";
+};
 }
