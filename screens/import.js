@@ -671,8 +671,7 @@ function renderStepDestination(cnt) {
     const totalVal = selected.reduce((sum, r) => sum + r.value, 0);
 
     cnt.innerHTML = `
-    cnt.innerHTML = `
-        < h3 > 4. Destino da Importação</h3 >
+        <h3>4. Destino da Importação</h3>
         <p>Você selecionou <strong>${selected.length}</strong> transações.</p>
         <p>Valor Total: <strong style="${totalVal < 0 ? 'color:red' : 'color:green'}">R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
 
@@ -709,9 +708,6 @@ function renderStepDestination(cnt) {
         state.dest.cardId = cnt.querySelector("#dstCard").value;
         state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
         state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
-        state.dest.cardId = cnt.querySelector("#dstCard").value;
-        state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
-        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
         state.step = 3; // Go back to Batch Review
         renderDispatcher(cnt);
     };
@@ -721,10 +717,6 @@ function renderStepDestination(cnt) {
         const mon = cnt.querySelector("#dstMonth").value;
 
         if (!cardId || !mon) return alert("Por favor, preencha Cartão e Mês da Fatura.");
-
-        state.dest.cardId = cardId;
-        state.dest.invoiceMonth = mon;
-        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
 
         state.dest.cardId = cardId;
         state.dest.invoiceMonth = mon;
@@ -741,7 +733,7 @@ function renderStepDestination(cnt) {
 
 function renderStepProcessing(cnt) {
     cnt.innerHTML = `
-        < h3 > 5. Processando...</h3 >
+        <h3>5. Processando...</h3>
         <p>Salvando transações no banco de dados.</p>
         <div style="width:100%; background:#eee; height:20px; border-radius:10px; overflow:hidden;">
             <div id="progBar" style="width:0%; background:#007bff; height:100%; transition:width 0.2s;"></div>
@@ -813,23 +805,23 @@ async function startImportProcess(cnt) {
         processed += chunk.length;
         const pct = Math.round((processed / total) * 100);
         progBar.style.width = pct + "%";
-        progText.textContent = `${ processed }/${total}`;
+        progText.textContent = `${processed}/${total}`;
 
-    // Yield to UI
-    await new Promise(r => setTimeout(r, 10));
-}
+        // Yield to UI
+        await new Promise(r => setTimeout(r, 10));
+    }
 
-// Finish
-progBar.style.width = "100%";
-progText.textContent = "Concluído!";
-finalMsg.style.display = "block";
+    // Finish
+    progBar.style.width = "100%";
+    progText.textContent = "Concluído!";
+    finalMsg.style.display = "block";
 
-// Update Invoice State (Circuit Breaker pattern - safe update)
-try {
-    setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
-} catch (e) { console.warn("Invoice update warning", e); }
+    // Update Invoice State (Circuit Breaker pattern - safe update)
+    try {
+        setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
+    } catch (e) { console.warn("Invoice update warning", e); }
 
-btnFinish.onclick = () => {
-    location.hash = "#invoices";
-};
+    btnFinish.onclick = () => {
+        location.hash = "#invoices";
+    };
 }
