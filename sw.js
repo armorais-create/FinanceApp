@@ -13,20 +13,20 @@ const CORE_ASSETS = [
   "./icons/icon-512.png",
 ];
 
+const INDEX_URL = new URL("./index.html", self.location).toString();
+const ROOT_URL = new URL("./", self.location).toString();
+
 // 1) Instala: faz cache sem quebrar se 1 arquivo falhar
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
 
-    // Evita o erro do addAll travar tudo se um arquivo der 404
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       CORE_ASSETS.map((url) => cache.add(url))
     );
 
-    // Se quiser debugar:
-    // results.forEach((r, i) => { if (r.status === "rejected") console.warn("Cache fail:", CORE_ASSETS[i], r.reason); });
-
-    // NÃO ativa automaticamente aqui; vamos ativar quando o usuário clicar "Atualizar agora"
+    // Não chama skipWaiting aqui.
+    // O app vai chamar quando você clicar "Atualizar agora".
   })());
 });
 
@@ -55,17 +55,25 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
 
+  // Só lidamos com GET (evita erro com POST/PUT)
+  if (req.method !== "GET") return;
+
   // Navegação do app (SPA): tenta rede, se falhar usa cache
   if (req.mode === "navigate") {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
-        const cache = await caches.open(CACHE_NAME);
-        cache.put("./index.html", fresh.clone());
+
+        // Só atualiza cache se a resposta estiver OK
+        if (fresh && fresh.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(INDEX_URL, fresh.clone());
+        }
+
         return fresh;
       } catch {
-        const cached = await caches.match("./index.html");
-        return cached || caches.match("./");
+        const cached = await caches.match(INDEX_URL);
+        return cached || caches.match(ROOT_URL);
       }
     })());
     return;
@@ -76,9 +84,26 @@ self.addEventListener("fetch", (event) => {
     const cached = await caches.match(req);
     if (cached) return cached;
 
-    const res = await fetch(req);
-    const cache = await caches.open(CACHE_NAME);
-    cache.put(req, res.clone());
-    return res;
+    try {
+      const res = await fetch(req);
+
+      // Só cacheia resposta OK
+      if (res && res.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        try {
+          await cache.put(req, res.clone());
+        } catch (e) {
+          // Se der algum erro de cache.put, não quebra o app
+          // (ex: respostas especiais/opaque em alguns casos)
+          console.warn("[SW] cache.put failed:", e);
+        }
+      }
+
+      return res;
+    } catch (e) {
+      // Se não tem cache e rede falha, deixa o navegador resolver (vai dar erro)
+      // Você pode melhorar isso depois com uma página offline opcional.
+      throw e;
+    }
   })());
 });
