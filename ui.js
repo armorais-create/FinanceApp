@@ -454,29 +454,80 @@ export async function wireSettingsHandlers(rootEl) {
       const file = e.target.files[0];
       if (!file) return;
 
+      // A) Validar extensão/tipo
+      if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
+        alert("Este arquivo não parece um backup (.json) do FinanceApp.\n\nSelecione o arquivo exportado em Config > Exportar.");
+        fileInput.value = "";
+        return;
+      }
+
       const text = await file.text();
+      let json;
       try {
-        const json = JSON.parse(text);
+        json = JSON.parse(text);
+      } catch (err) {
+        // B) Validar JSON
+        alert("Não consegui ler este arquivo como JSON.\n\nEle pode estar corrompido ou não ser um backup do FinanceApp (ex.: CSV/OFX).\nTente exportar novamente em Config > Exportar e selecione o .json gerado.");
+        fileInput.value = "";
+        return;
+      }
 
-        // Summary for Confirmation
-        const d = json.data || {};
+      // 1.1) Validação Rápida de App (Se tiver meta, mas for outro app, rejeita logo)
+      if (json.meta && json.meta.appId && json.meta.appId !== "financeapp") {
+        alert("Este arquivo não é um backup do FinanceApp (parece ser de outro app).\nExporte novamente em Config > Exportar e selecione o .json gerado.");
+        fileInput.value = "";
+        return;
+      }
+
+      try {
+        // Pre-calc Summary for Confirmation (Best effort)
+        // We assume structure might be valid here, but real validation is in importDB
+        let d = json.data;
+        // If legacy raw dump, d might be undefined or we look at root
+        if (!d && (Array.isArray(json.transactions) || Array.isArray(json.accounts))) {
+          d = json;
+        }
+        d = d || {};
+
         const countTx = d.transactions?.length || 0;
-        const countGoals = d.goal_templates?.length || 0;
+        const countGoals = (d.goal_templates?.length || 0) + (d.goals?.length || 0);
         const countRules = d.rules?.length || 0;
+        const backupDate = json.meta?.createdAt ? new Date(json.meta.createdAt).toLocaleString() : "(Sem data)";
 
-        const msg = `Backup válido encontrado.\n\nRESUMO:\n- Lançamentos: ${countTx}\n- Metas: ${countGoals}\n- Regras: ${countRules}\n\nClique OK para SUBSTITUIR TUDO pelos dados do backup.\nClique Cancelar para abortar.`;
+        // E) Confirmação
+        const msg = `Importar backup e substituir todos os seus dados?\n\nRESUMO DO BACKUP:\nData: ${backupDate}\n- Lançamentos: ${countTx}\n- Metas: ${countGoals}\n- Regras: ${countRules}\n\nIsso vai substituir TODOS os seus dados atuais neste aparelho. Continuar?`;
 
         if (!confirm(msg)) {
           fileInput.value = "";
           return;
         }
 
-        await importDB(json, true); // Replace = true for now as MVP default
-        alert("Importação concluída com sucesso!");
-        location.hash = "#home";
-        location.reload();
+        // UI Busy State
+        const originalText = btnImport.innerText;
+        btnImport.disabled = true;
+        btnImport.innerText = "⏳ Importando...";
+
+        try {
+          // F) Segurança de dados (Atomic Restore via db.js)
+          // 1.4) Call importDB with original JSON
+          await importDB(json, true);
+
+          alert("Backup importado com sucesso.\nO app será recarregado agora.");
+          location.hash = "#home";
+          location.reload();
+        } catch (err) {
+          // 1.5) Show friendly error from db.js directly
+          alert(err.message);
+        } finally {
+          // Reset UI
+          btnImport.disabled = false;
+          btnImport.innerText = originalText;
+          fileInput.value = "";
+        }
+
       } catch (err) {
-        alert("Erro ao ler arquivo de backup: " + err.message);
+        alert(`Erro na pré-validação:\n${err.message}`);
+        fileInput.value = "";
       }
     };
   }

@@ -1,6 +1,19 @@
 // db.js — banco local no navegador (IndexedDB)
 const DB_NAME = "financeapp";
 const DB_VERSION = 18; // INCREMENTED for Recurrent Goals
+const SUPPORTED_BACKUP_VERSION = 1;
+
+// Helper to validate legacy dumps
+function looksLikeFinanceAppDump(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    // Check for at least 2 known arrays
+    const keys = ["transactions", "accounts", "cards", "categories", "people", "settings", "tags", "subcategories", "rules"];
+    let matchCount = 0;
+    for (const k of keys) {
+        if (Array.isArray(obj[k])) matchCount++;
+    }
+    return matchCount >= 2;
+}
 
 // Stores definitions
 const STORES = [
@@ -240,9 +253,14 @@ export async function deleteInvoice(cardId, invoiceMonth) {
 // BACKUP FUNCTIONS
 export async function exportDB() {
     const db = await openDB();
+    // HARDENING: Wrap with metadata for validation
     const backup = {
-        version: DB_VERSION,
-        timestamp: new Date().toISOString(),
+        meta: {
+            appId: "financeapp",
+            backupVersion: 1, // Current supported backup version
+            createdAt: new Date().toISOString(),
+            dbVersion: DB_VERSION
+        },
         data: {}
     };
 
@@ -297,22 +315,51 @@ export async function importDB(backupData, replace = true) {
     const db = await openDB();
     const existingStores = STORES.filter(s => db.objectStoreNames.contains(s));
 
-    // Validate structure
-    if (!backupData || !backupData.data) throw new Error("Arquivo de backup inválido.");
+    // HARDENING: Normalize Data Source
+    let dataMap = null;
+
+    // 1. New Format (Meta + Data)
+    if (backupData.meta) {
+        if (backupData.meta.appId !== "financeapp") {
+            throw new Error("Este arquivo não é um backup do FinanceApp (parece ser de outro app). Exporte novamente em Config > Exportar.");
+        }
+        if ((backupData.meta.backupVersion || 0) > SUPPORTED_BACKUP_VERSION) {
+            throw new Error("Este backup foi gerado por uma versão mais nova do FinanceApp e não é compatível com a versão atual. Atualize o app e tente importar novamente.");
+        }
+        // If valid meta, data must exist
+        if (!backupData.data) throw new Error("Arquivo de backup corrompido (sem dados).");
+        dataMap = backupData.data;
+    }
+    // 2. Legacy Format or Raw Dump
+    else {
+        // Validation for legacy
+        const isLegacyWrapper = backupData.data && typeof backupData.data === 'object';
+        const candidate = isLegacyWrapper ? backupData.data : backupData;
+
+        if (!looksLikeFinanceAppDump(candidate)) {
+            throw new Error("Este JSON não parece ser um backup do FinanceApp. Exporte em Config > Exportar e selecione o .json gerado.");
+        }
+        dataMap = candidate;
+    }
+
+    // Double check we have something
+    if (!dataMap) {
+        throw new Error("Falha ao ler dados do backup.");
+    }
 
     const t = db.transaction(existingStores, "readwrite");
 
     return new Promise((resolve, reject) => {
         t.oncomplete = () => resolve(true);
         t.onerror = () => reject(t.error);
-        t.onabort = () => reject(t.error);
+        t.onabort = () => reject(new Error("Falha ao importar: seus dados atuais não foram alterados. Tente novamente com um backup válido."));
 
         try {
             existingStores.forEach(name => {
                 const store = t.objectStore(name);
                 if (replace) store.clear();
 
-                const items = backupData.data[name];
+                const items = dataMap[name];
                 if (Array.isArray(items)) {
                     items.forEach(item => store.put(item));
                 }
