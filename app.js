@@ -21,13 +21,12 @@ function esc(s) {
 // =========================================
 window.onerror = function (msg, source, lineno, colno, error) {
   console.error("[GLOBAL ERROR]", msg, error);
-  // Optional: showing a small toast instead of alert for non-critical
   const toast = document.createElement("div");
   toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:rgba(255,0,0,0.9); color:white; padding:10px 20px; border-radius:5px; z-index:9999; font-size:14px;";
   toast.innerText = "Erro: " + msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
-  return false; // let default handler run too
+  return false;
 };
 
 window.addEventListener("unhandledrejection", (e) => {
@@ -91,8 +90,6 @@ async function migrateLegacyGoals() {
       // Overrides (for variations)
       for (let i = 1; i < goals.length; i++) {
         const g = goals[i];
-        // If target differs from baseline, override it.
-        // Note: if user changed target back and forth, overrides capture it.
         if (g.targetCents !== earliest.targetCents) {
           await put("goal_overrides", {
             id: uid("go"),
@@ -174,8 +171,10 @@ const screens = {
         const ov = overrides.find(o => o.templateId === tmplId && o.month === month);
         if (ov) return ov.targetCents;
 
-        const effRevs = revisions.filter(r => r.templateId === tmplId && r.effectiveFromMonth <= month)
+        const effRevs = revisions
+          .filter(r => r.templateId === tmplId && r.effectiveFromMonth <= month)
           .sort((a, b) => b.effectiveFromMonth.localeCompare(a.effectiveFromMonth));
+
         return effRevs.length > 0 ? effRevs[0].targetCents : 0;
       };
 
@@ -188,14 +187,11 @@ const screens = {
           if (txDate !== currentMonth) return false;
           if (t.type !== "expense") return false;
 
-          // Scope Logic
           if (g.scopeType === "tag") {
-            // Tag Match (Case Insensitive)
             if (!t.tags || !Array.isArray(t.tags)) return false;
             const targetTag = (g.scopeValue || "").toLowerCase();
             return t.tags.some(tag => tag.toLowerCase() === targetTag);
           } else {
-            // Category Match (Default)
             if (t.categoryId !== g.categoryId) return false;
             if (g.subcategoryId && t.subcategory !== g.subcategoryId) return false;
           }
@@ -218,52 +214,52 @@ const screens = {
 
       return `
         <div class="card">
-        <div><strong>Resumo de Faturas (Aberto)</strong></div>
-        <div style="display:flex; justify-content:space-between; margin-top:10px;">
+          <div><strong>Resumo de Faturas (Aberto)</strong></div>
+          <div style="display:flex; justify-content:space-between; margin-top:10px;">
             <div style="text-align:center">
-                <div style="font-size:1.5em; font-weight:bold">${openCount}</div>
-                <div class="small">Faturas</div>
+              <div style="font-size:1.5em; font-weight:bold">${openCount}</div>
+              <div class="small">Faturas</div>
             </div>
             <div style="text-align:center">
-                <div style="font-size:1.5em; font-weight:bold">R$ ${openTotalBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div class="small">Total a Pagar</div>
+              <div style="font-size:1.5em; font-weight:bold">R$ ${openTotalBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div class="small">Total a Pagar</div>
             </div>
-        </div>
+          </div>
         </div>
 
         <div class="card">
-            <div><strong>Metas de ${currentMonth}</strong></div>
-            <div style="margin-top:10px;">
-                ${!hasGoals ? '<div class="small">Nenhuma meta ativa para este mês.</div>' : ''}
-                ${goalProgress.map(g => {
-        const target = g.targetCents / 100;
-        const spent = g.spent;
-        const color = g.pct >= 100 ? '#dc3545' : (g.pct >= 80 ? '#ffc107' : '#28a745');
-        return `
-                        <div style="margin-bottom:10px;">
-                            <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:2px;">
-                                <strong>${esc(g.name)}</strong>
-                                <span>R$ ${spent.toFixed(2)} / ${target.toFixed(2)}</span>
-                            </div>
-                            <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
-                                <div style="width:${g.pct}%; background:${color}; height:100%;"></div>
-                            </div>
-                        </div>
-                    `;
-      }).join("")}
-            </div>
+          <div><strong>Metas de ${currentMonth}</strong></div>
+          <div style="margin-top:10px;">
+            ${!hasGoals ? '<div class="small">Nenhuma meta ativa para este mês.</div>' : ''}
+            ${goalProgress.map(g => {
+              const target = g.targetCents / 100;
+              const spent = g.spent;
+              const color = g.pct >= 100 ? '#dc3545' : (g.pct >= 80 ? '#ffc107' : '#28a745');
+              return `
+                <div style="margin-bottom:10px;">
+                  <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:2px;">
+                    <strong>${esc(g.name)}</strong>
+                    <span>R$ ${spent.toFixed(2)} / ${target.toFixed(2)}</span>
+                  </div>
+                  <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
+                    <div style="width:${g.pct}%; background:${color}; height:100%;"></div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
         </div>
 
         <div class="card">
-        <div><strong>Atalhos</strong></div>
-        <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+          <div><strong>Atalhos</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
             <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
             <button data-action="nav" data-hash="#invoices">Ver Faturas</button>
             <button data-action="nav" data-hash="#import">Importar</button>
             <button data-action="nav" data-hash="#settings">Configurações</button>
+          </div>
         </div>
-        </div>
-        `;
+      `;
     } catch (e) {
       console.error("Home Render Error", e);
       return `<div class="card error">Erro ao carregar Home: ${e.message}</div>`;
@@ -283,13 +279,12 @@ let currentTab = "";
 
 async function setTab(tabKey) {
   if (currentTab === tabKey) {
-    // Optional: force refresh? For now, allow re-render.
+    // allow re-render
   }
   currentTab = tabKey;
 
   console.log("[ROUTER] Loading:", tabKey);
 
-  // UI Updates
   tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === tabKey));
   const label = tabs.find(b => b.dataset.tab === tabKey)?.textContent ?? "FinanceApp";
   titleEl.textContent = label;
@@ -302,7 +297,6 @@ async function setTab(tabKey) {
     viewEl.innerHTML = html;
     console.log("[ROUTER] Rendered HTML for:", tabKey);
 
-    // Wire Handlers (Safe Wrappers)
     if (tabKey === "settings") await wireSettingsHandlers(viewEl);
     else if (tabKey === "tx") await wireTxHandlers(viewEl);
     else if (tabKey === "invoices") await wireInvoiceHandlers(viewEl);
@@ -314,12 +308,87 @@ async function setTab(tabKey) {
   } catch (err) {
     console.error("[ROUTER ERROR]", err);
     viewEl.innerHTML = `
-        <div class="card" style="border-left: 5px solid red;">
-            <strong>Erro na tela!</strong><br/>
-            <p>${err.message}</p>
-            <button onclick="location.hash='#home'">Voltar Home</button>
-        </div>
-      `;
+      <div class="card" style="border-left: 5px solid red;">
+        <strong>Erro na tela!</strong><br/>
+        <p>${err.message}</p>
+        <button onclick="location.hash='#home'">Voltar Home</button>
+      </div>
+    `;
+  }
+}
+
+// =========================================
+// PWA UPDATE UX (11C-3)
+// =========================================
+function showUpdateBanner(reg) {
+  if (document.getElementById("pwa-update-banner")) return;
+
+  const banner = document.createElement("div");
+  banner.id = "pwa-update-banner";
+  banner.style.position = "fixed";
+  banner.style.left = "12px";
+  banner.style.right = "12px";
+  banner.style.bottom = "12px";
+  banner.style.padding = "12px";
+  banner.style.borderRadius = "12px";
+  banner.style.background = "white";
+  banner.style.border = "1px solid #ddd";
+  banner.style.boxShadow = "0 8px 24px rgba(0,0,0,0.12)";
+  banner.style.zIndex = "9999";
+  banner.style.display = "flex";
+  banner.style.alignItems = "center";
+  banner.style.justifyContent = "space-between";
+  banner.style.gap = "12px";
+
+  banner.innerHTML = `
+    <div style="font-size:14px; line-height:1.2;">
+      <div style="font-weight:600;">Nova versão disponível</div>
+      <div style="opacity:0.75;">Toque em “Atualizar agora” para aplicar.</div>
+    </div>
+    <button id="pwa-update-btn" style="padding:10px 12px; border-radius:10px; border:1px solid #ccc; cursor:pointer; background:#f7f7f7;">
+      Atualizar agora
+    </button>
+  `;
+
+  document.body.appendChild(banner);
+
+  document.getElementById("pwa-update-btn").addEventListener("click", () => {
+    if (reg.waiting) {
+      reg.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
+  });
+}
+
+async function initServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    console.log("[SW] Registered:", reg.scope);
+
+    // Se já existe uma versão nova "waiting", mostra o banner
+    if (reg.waiting) showUpdateBanner(reg);
+
+    // Quando detectar update baixando
+    reg.addEventListener("updatefound", () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+
+      newWorker.addEventListener("statechange", () => {
+        // installed + controller => é UPDATE (não primeira instalação)
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          showUpdateBanner(reg);
+        }
+      });
+    });
+
+    // Quando o novo SW assumir o controle, recarrega (após clicar “Atualizar agora”)
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
+    });
+
+  } catch (err) {
+    console.warn("[SW] Registration failed:", err);
   }
 }
 
@@ -329,17 +398,14 @@ async function setTab(tabKey) {
 
 // 1. Click Handling (Navigation & Actions)
 document.body.addEventListener("click", async (e) => {
-  // A. Navigation (data-action="nav" or data-hash)
   const navBtn = e.target.closest("[data-action='nav'], [data-hash], [data-tab]");
   if (navBtn) {
-    // 1. data-tab support (Bottom Nav)
     if (navBtn.dataset.tab) {
       e.preventDefault();
       location.hash = "#" + navBtn.dataset.tab;
       return;
     }
 
-    // 2. data-action="nav" support (Shortcuts)
     const hash = navBtn.dataset.hash || navBtn.getAttribute("href");
     if (hash && hash.startsWith("#")) {
       e.preventDefault();
@@ -348,12 +414,10 @@ document.body.addEventListener("click", async (e) => {
     }
   }
 
-  // B. Delete Generic (data-del)
   if (e.target.matches("[data-del]")) {
     if (!confirm("Tem certeza que deseja excluir este item?")) return;
     const [store, id] = e.target.dataset.del.split(":");
     await remove(store, id);
-    // Refresh current screen
     const screen = location.hash.replace("#", "") || "home";
     await setTab(screen);
   }
@@ -369,4 +433,7 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("DOMContentLoaded", () => {
   const hash = location.hash.replace("#", "") || "home";
   setTab(hash);
+
+  // PWA: registra SW após DOM estar pronto (banner usa document.body)
+  initServiceWorker();
 });
