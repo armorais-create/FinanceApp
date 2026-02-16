@@ -4,6 +4,7 @@ import { txScreen, wireTxHandlers } from "./screens/tx.js";
 import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
 import { importScreen, wireImportHandlers } from "./screens/import.js";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
+import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
 
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
@@ -232,10 +233,10 @@ const screens = {
           <div style="margin-top:10px;">
             ${!hasGoals ? '<div class="small">Nenhuma meta ativa para este mês.</div>' : ''}
             ${goalProgress.map(g => {
-              const target = g.targetCents / 100;
-              const spent = g.spent;
-              const color = g.pct >= 100 ? '#dc3545' : (g.pct >= 80 ? '#ffc107' : '#28a745');
-              return `
+        const target = g.targetCents / 100;
+        const spent = g.spent;
+        const color = g.pct >= 100 ? '#dc3545' : (g.pct >= 80 ? '#ffc107' : '#28a745');
+        return `
                 <div style="margin-bottom:10px;">
                   <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:2px;">
                     <strong>${esc(g.name)}</strong>
@@ -246,7 +247,7 @@ const screens = {
                   </div>
                 </div>
               `;
-            }).join("")}
+      }).join("")}
           </div>
         </div>
 
@@ -269,7 +270,8 @@ const screens = {
   invoices: async () => await invoiceScreen(),
   import: async () => await importScreen(),
   settings: async () => await settingsScreen(),
-  installments: async () => await installmentsScreen()
+  installments: async () => await installmentsScreen(),
+  reports: async () => await reportsScreen()
 };
 
 // =========================================
@@ -302,6 +304,7 @@ async function setTab(tabKey) {
     else if (tabKey === "invoices") await wireInvoiceHandlers(viewEl);
     else if (tabKey === "import") await wireImportHandlers(viewEl);
     else if (tabKey === "installments") await wireInstallmentsHandlers(viewEl);
+    else if (tabKey === "reports") await wireReportsHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
 

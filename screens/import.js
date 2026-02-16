@@ -10,6 +10,14 @@ function esc(s) {
         .replaceAll("'", "&#039;");
 }
 
+function normalizeStr(s) {
+    return (s || "").toString()
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+        .replace(/\s+/g, " ") // collapse spaces
+        .trim();
+}
+
 /* =========================================
    STATE MANAGEMENT
    ========================================= */
@@ -466,7 +474,7 @@ function renderStepBatchReview(cnt) {
     const catOpts = `<option value="">(Não Alterar)</option>` +
         state.cache.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
 
-    // Subcategories dependent on logic, will load dynamically or show all if cat not selected? 
+    // Subcategories dependent on logic, will load dynamically or show all if cat not selected?
     // Usually batch edit for subcat requires cat. We'll disable subcat until cat selected OR show all?
     // Let's show (Não Alterar) and if they pick a subcat, we imply the cat?
     // Simpler: Just allow selecting category first.
@@ -517,8 +525,14 @@ function renderStepBatchReview(cnt) {
                 </label>
             </div>
 
-            <div style="margin-top:10px; text-align:right;">
-                <button id="btnBatchApply" style="background:#17a2b8; color:white;">Aplicar Alterações</button>
+            <div style="margin-top:10px; display:flex; gap:10px; justify-content:space-between;">
+                <!-- Advanced Smart Actions -->
+                 <div style="display:flex; gap:5px;">
+                    <button id="btnSimilar" style="background:#6c757d; font-size:11px;" title="Selecione 1 item para usar como modelo">🔁 Aplicar a Semelhantes</button>
+                    <button id="btnSaveRule" style="background:#ffc107; color:black; font-size:11px;" title="Selecione 1 item para criar regra">⭐ Salvar como Regra</button>
+                </div>
+                
+                <button id="btnBatchApply" style="background:#17a2b8; color:white;">Aplicar Alterações (Seleção)</button>
             </div>
         </div>
 
@@ -584,7 +598,7 @@ function renderStepBatchReview(cnt) {
         batchSub.disabled = false;
     };
 
-    // 3. Apply Batch
+    // 3. Apply Batch (Selected)
     cnt.querySelector("#btnBatchApply").onclick = () => {
         const catId = batchCat.value;
         const subId = batchSub.value;
@@ -602,10 +616,10 @@ function renderStepBatchReview(cnt) {
 
             if (catId) {
                 r.categoryId = catId;
-                // Only reset sub if logic dictates, but here we only apply sub if subId is set. 
+                // Only reset sub if logic dictates, but here we only apply sub if subId is set.
                 // BUT if I change category, I SHOULD reset subcategory if it doesn't match?
-                // Yes, if I set category, old sub is invalid. 
-                // So if catId is set, we overwrite cat. 
+                // Yes, if I set category, old sub is invalid.
+                // So if catId is set, we overwrite cat.
                 // If subId is NOT set, we should probably clear sub IF it doesn't belong to new cat.
                 // For simplicity: If catId changed, clear sub unless subId is also provided.
                 if (!subId) r.subcategoryId = "";
@@ -624,7 +638,7 @@ function renderStepBatchReview(cnt) {
             // Actually Step 4 doesn't show "Person" column logic, it shows "Holder".
             // But we have "payerRole" in Rows.
             // And we have "personId" in Transaction Schema.
-            // Import Step 1 maps `payerRole`. 
+            // Import Step 1 maps `payerRole`.
             // `personId` is usually for the "Responsible" field in legacy/other views.
             // Let's support it if the rule engine or batch wants it.
 
@@ -638,10 +652,95 @@ function renderStepBatchReview(cnt) {
         // Re-render list
         cnt.querySelector("#previewBody").innerHTML = renderBatchPreviewRows();
     };
+
+    // 4. Smart Actions
+    const getSingleSelected = () => {
+        const sel = state.rows.filter(r => r.selected);
+        if (sel.length !== 1) {
+            alert("Por favor, selecione EXATAMENTE 1 item para usar esta função.");
+            return null;
+        }
+        return sel[0];
+    };
+
+    cnt.querySelector("#btnSimilar").onclick = () => {
+        const ref = getSingleSelected();
+        if (!ref) return;
+
+        const refNorm = normalizeStr(ref.description);
+        // Find matches (same desc, same sign/type usually?)
+        // Let's match by normalized description only for simplicity, as requested.
+        const matches = state.rows.filter(r => normalizeStr(r.description) === refNorm && r.id !== ref.id);
+
+        if (matches.length === 0) {
+            return alert("Nenhum outro item com descrição semelhante encontrado.");
+        }
+
+        if (!confirm(`Encontrados ${matches.length} itens com descrição similar a "${ref.description}".\n\nAplicar a classificação deste item (Categoria, Tags, Pessoa, etc) a todos eles?`)) {
+            return;
+        }
+
+        // Apply
+        let count = 0;
+        matches.forEach(r => {
+            r.categoryId = ref.categoryId;
+            r.subcategoryId = ref.subcategoryId;
+            r.tags = ref.tags;
+            r.personId = ref.personId;
+            r.payerRole = ref.payerRole;
+            r.cardType = ref.cardType;
+            // Also select them so user can see? Or just update?
+            // Let's update data.
+            count++;
+        });
+
+        alert(`Aplicado a ${count} itens.`);
+        cnt.querySelector("#previewBody").innerHTML = renderBatchPreviewRows();
+    };
+
+    cnt.querySelector("#btnSaveRule").onclick = async () => {
+        const ref = getSingleSelected();
+        if (!ref) return;
+
+        const defaultName = ref.description.trim();
+        const ruleName = prompt("Nome da Nova Regra:", defaultName);
+        if (!ruleName) return;
+
+        const matchTerm = prompt("Termo para identificar (Descrição contém):", normalizeStr(ref.description));
+        if (!matchTerm) return;
+
+        // Check duplicates? (Optimistic)
+        // Construction rule object
+        const newRule = {
+            id: uid("rule"),
+            name: ruleName,
+            priority: 10,
+            active: true,
+            match: {
+                descriptionIncludes: matchTerm
+            },
+            actions: {
+                categoryId: ref.categoryId || "",
+                subcategoryId: ref.subcategoryId || "",
+                tags: ref.tags ? ref.tags.split(",").map(t => t.trim()) : [],
+                personId: ref.personId || ""
+            },
+            options: {
+                overwrite: confirm("Sobrescrever dados existentes quando aplicar esta regra?")
+            }
+        };
+
+        try {
+            await put("rules", newRule);
+            alert("Regra salva com sucesso!");
+        } catch (e) {
+            alert("Erro ao salvar regra: " + e.message);
+        }
+    };
 }
 
 function renderBatchPreviewRows() {
-    // Show only selected? Or all? 
+    // Show only selected? Or all?
     // "Revisar Importação" usually implies checking what will be imported.
     // So filter by selected.
     return state.rows.filter(r => r.selected).slice(0, 100).map(r => {
