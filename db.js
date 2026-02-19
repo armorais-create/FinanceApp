@@ -1,6 +1,6 @@
 // db.js — banco local no navegador (IndexedDB)
 const DB_NAME = "financeapp";
-const DB_VERSION = 18; // INCREMENTED for Recurrent Goals
+const DB_VERSION = 19; // INCREMENTED for Bills Feature
 const SUPPORTED_BACKUP_VERSION = 1;
 
 // Helper to validate legacy dumps
@@ -32,7 +32,9 @@ const STORES = [
     "goals", // Legacy, kept for migration or safe fallback
     "goal_templates",
     "goal_revisions",
-    "goal_overrides"
+    "goal_overrides",
+    "bill_templates",
+    "bills"
 ];
 
 function openDB() {
@@ -127,6 +129,19 @@ function openDB() {
                 const s = db.createObjectStore("goal_overrides", { keyPath: "id" });
                 s.createIndex("by_template", "templateId", { unique: false });
                 s.createIndex("by_month", "month", { unique: false });
+            }
+
+            // Bills Feature
+            if (!db.objectStoreNames.contains("bill_templates")) {
+                console.log("[DB Upgrade] Creating store: bill_templates");
+                db.createObjectStore("bill_templates", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("bills")) {
+                console.log("[DB Upgrade] Creating store: bills");
+                const s = db.createObjectStore("bills", { keyPath: "id" });
+                s.createIndex("by_month", "month", { unique: false });
+                s.createIndex("by_template", "templateId", { unique: false });
             }
         };
 

@@ -5,6 +5,7 @@ import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
 import { importScreen, wireImportHandlers } from "./screens/import.js";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
+import { billsScreen, wireBillsHandlers } from "./screens/bills.js";
 
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
@@ -255,6 +256,7 @@ const screens = {
           <div><strong>Atalhos</strong></div>
           <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
             <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
+            <button data-action="nav" data-hash="#bills">Contas a Pagar</button>
             <button data-action="nav" data-hash="#invoices">Ver Faturas</button>
             <button data-action="nav" data-hash="#import">Importar</button>
             <button data-action="nav" data-hash="#settings">Configurações</button>
@@ -271,7 +273,8 @@ const screens = {
   import: async () => await importScreen(),
   settings: async () => await settingsScreen(),
   installments: async () => await installmentsScreen(),
-  reports: async () => await reportsScreen()
+  reports: async () => await reportsScreen(),
+  bills: async () => await billsScreen()
 };
 
 // =========================================
@@ -305,6 +308,7 @@ async function setTab(tabKey) {
     else if (tabKey === "import") await wireImportHandlers(viewEl);
     else if (tabKey === "installments") await wireInstallmentsHandlers(viewEl);
     else if (tabKey === "reports") await wireReportsHandlers(viewEl);
+    else if (tabKey === "bills") await wireBillsHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
 
