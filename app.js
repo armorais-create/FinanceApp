@@ -5,7 +5,7 @@ import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
 import { importScreen, wireImportHandlers } from "./screens/import.js";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
-import { billsScreen, wireBillsHandlers } from "./screens/bills.js";
+import { billsScreen, wireBillsHandlers } from "./screens/bills.js?v=1.0";
 
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
@@ -367,6 +367,8 @@ function showUpdateBanner(reg) {
 }
 
 async function initServiceWorker() {
+  // FORCE DISABLE SW
+  return;
   if (!("serviceWorker" in navigator)) return;
 
   try {
