@@ -94,6 +94,17 @@ export async function installmentsScreen() {
                 </label>
                 
                 <label>Tags <input type="text" name="tags" placeholder="tag1, tag2" /></label>
+                
+                <!-- USD Fix Rate Block -->
+                <div id="editFxBlock" style="display:none; grid-column:span 2; background:#e1f0fa; padding:10px; border-radius:4px; font-size:11px;">
+                    <div style="font-weight:bold; color:#0056b3;">Transação Internacional (USD)</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px;">
+                        <div id="editFxLabel">Taxa Usada: R$ 0.00 (Flutuante)</div>
+                        <button type="button" id="btnFixFx" style="font-size:10px; padding:4px 8px; background:#17a2b8; color:white; border:none; border-radius:3px;">Fixar Taxa Atual</button>
+                        <button type="button" id="btnUnfixFx" style="font-size:10px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:3px; display:none;">Descongelar</button>
+                        <input type="hidden" name="fxRateTracker" id="fxRateTracker" />
+                    </div>
+                </div>
     
                 <div style="display:flex; gap:10px; margin-top:10px;">
                     <button type="button" id="cancelEditTx" style="background:#999">Cancelar</button>
@@ -403,6 +414,45 @@ export async function wireInstallmentsHandlers(rootEl) {
         const accSel = f.querySelector("[name=accountId]");
         if (accSel) accSel.value = tx.accountId || "";
 
+        // -- FX Logic --
+        const fxBlock = f.querySelector("#editFxBlock");
+        const valBRLText = f.querySelector("#editFxLabel");
+        const btnFix = f.querySelector("#btnFixFx");
+        const btnUnfix = f.querySelector("#btnUnfixFx");
+        const tracker = f.querySelector("#fxRateTracker");
+        if (tracker) tracker.value = ""; // reset
+
+        if (tx.currency === "USD") {
+            fxBlock.style.display = "block";
+            const isFixed = parseFloat(tx.fxRate) > 0;
+            const currentRate = isFixed ? tx.fxRate : ((tx.valueBRL || 0) / tx.value);
+
+            valBRLText.innerHTML = `Taxa: R$ ${currentRate.toFixed(4)} <br/> <small style='color:#666'>(${isFixed ? "Fixada/Congelada" : "Flutuante/Global"})</small>`;
+
+            if (isFixed) {
+                btnFix.style.display = "none";
+                btnUnfix.style.display = "inline-block";
+            } else {
+                btnFix.style.display = "inline-block";
+                btnUnfix.style.display = "none";
+            }
+
+            btnFix.onclick = () => {
+                tracker.value = "fixed";
+                btnFix.style.display = "none";
+                valBRLText.innerHTML += " <strong style='color:green'>(Será Fixada!)</strong>";
+            };
+
+            btnUnfix.onclick = () => {
+                tracker.value = "unfixed";
+                btnUnfix.style.display = "none";
+                valBRLText.innerHTML += " <strong style='color:red'>(Será Descongelada!)</strong>";
+            };
+        } else {
+            if (fxBlock) fxBlock.style.display = "none";
+        }
+
+        d.dataset.origTx = JSON.stringify(tx);
         d.showModal();
     }
 
@@ -424,6 +474,22 @@ export async function wireInstallmentsHandlers(rootEl) {
                 tags: fd.get("tags") ? fd.get("tags").split(",").map(s => s.trim()) : [],
                 accountId: fd.get("accountId")
             };
+
+            // Fx Rate Tracking
+            const trackedFx = fd.get("fxRateTracker");
+            if (trackedFx === "fixed") {
+                const originalDataRaw = editD.dataset.origTx;
+                if (originalDataRaw) {
+                    const otx = JSON.parse(originalDataRaw);
+                    if (otx.currency === "USD" && !otx.fxRate) {
+                        // Getting global rate or falling back to derive
+                        const currentValBRL = parseFloat(otx.valueBRL) || (parseFloat(otx.value) * 5.0); // 5.0 is just a generic fallback if settings were inaccessible. Safe enough!
+                        updates.fxRate = currentValBRL / parseFloat(otx.value);
+                    }
+                }
+            } else if (trackedFx === "unfixed") {
+                updates.fxRate = null; // Unfix
+            }
 
             await updateTransaction(id, updates);
             editD.close();

@@ -6,6 +6,7 @@ import { importScreen, wireImportHandlers } from "./screens/import.js";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
 import { billsScreen, wireBillsHandlers } from "./screens/bills.js?v=1.0";
+import { loansScreen, wireLoansHandlers } from "./screens/loans.js";
 
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
@@ -253,13 +254,28 @@ const screens = {
         </div>
 
         <div class="card">
-          <div><strong>Atalhos</strong></div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+          <div><strong>Atalhos Rápidos</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+            <button data-action="nav" data-hash="#reports" style="background:#007bff; color:white;">📊 Painel / Relatórios</button>
             <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
-            <button data-action="nav" data-hash="#bills">Contas a Pagar</button>
-            <button data-action="nav" data-hash="#invoices">Ver Faturas</button>
-            <button data-action="nav" data-hash="#import">Importar</button>
-            <button data-action="nav" data-hash="#settings">Configurações</button>
+            <button data-action="nav" data-hash="#import">Importar Planilha</button>
+            <button data-action="nav" data-hash="#invoices" style="background:#6c757d; color:white;">Ver Faturas</button>
+            <button data-action="nav" data-hash="#settings" style="background:#555; color:white; grid-column: span 2;">Configurações</button>
+          </div>
+        </div>
+        
+        <div class="card" style="border: 1px solid #17a2b8;">
+          <div style="color:#17a2b8;"><strong>Contas a Pagar</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+            <button data-action="nav" data-hash="#bills" style="background:#17a2b8; color:white;">📅 Mês Atual</button>
+            <button data-action="nav" data-hash="#bills?next" style="background:#fff; color:#17a2b8; border:1px solid #17a2b8;">➡️ Próximos 30 Dias</button>
+          </div>
+        </div>
+
+        <div class="card" style="border: 1px solid #28a745; margin-top:10px;">
+          <div style="color:#28a745;"><strong>Dívidas & Empréstimos</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-top:10px;">
+            <button data-action="nav" data-hash="#loans" style="background:#28a745; color:white; padding:10px;">🤝 Controle de Dívidas</button>
           </div>
         </div>
       `;
@@ -274,7 +290,8 @@ const screens = {
   settings: async () => await settingsScreen(),
   installments: async () => await installmentsScreen(),
   reports: async () => await reportsScreen(),
-  bills: async () => await billsScreen()
+  bills: async () => await billsScreen(),
+  loans: async () => await loansScreen()
 };
 
 // =========================================
@@ -282,13 +299,17 @@ const screens = {
 // =========================================
 let currentTab = "";
 
-async function setTab(tabKey) {
-  if (currentTab === tabKey) {
+async function setTab(tabKeyRaw) {
+  const parts = tabKeyRaw.split("?");
+  const tabKey = parts[0];
+  const query = parts[1] || "";
+
+  if (currentTab === tabKeyRaw) {
     // allow re-render
   }
-  currentTab = tabKey;
+  currentTab = tabKeyRaw;
 
-  console.log("[ROUTER] Loading:", tabKey);
+  console.log("[ROUTER] Loading:", tabKeyRaw);
 
   tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === tabKey));
   const label = tabs.find(b => b.dataset.tab === tabKey)?.textContent ?? "FinanceApp";
@@ -309,6 +330,7 @@ async function setTab(tabKey) {
     else if (tabKey === "installments") await wireInstallmentsHandlers(viewEl);
     else if (tabKey === "reports") await wireReportsHandlers(viewEl);
     else if (tabKey === "bills") await wireBillsHandlers(viewEl);
+    else if (tabKey === "loans") await wireLoansHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
 

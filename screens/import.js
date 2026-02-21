@@ -1,4 +1,4 @@
-import { list, put, uid } from "../db.js";
+import { list, put, uid, get } from "../db.js";
 import { setInvoiceState } from "./invoice.js";
 import { importer } from "../utils/importer.js";
 import { applyRulesToMany } from "../rules_engine.js";
@@ -44,7 +44,9 @@ const state = {
         subcategories: [], // Flattened or map? We'll load all.
         cards: [],
         people: [],
-        tags: []
+        tags: [],
+        transactions: [],
+        historyMap: {}
     }
 };
 
@@ -69,18 +71,40 @@ export async function wireImportHandlers(rootEl) {
     // Load dependencies once
     if (state.cache.categories.length === 0) {
         try {
-            const [cats, subs, cards, people, tags] = await Promise.all([
+            const [cats, subs, cards, people, tags, txs] = await Promise.all([
                 list("categories"),
                 list("subcategories"),
                 list("cards"),
                 list("people"),
-                list("tags")
+                list("tags"),
+                list("transactions")
             ]);
             state.cache.categories = cats;
             state.cache.subcategories = subs;
             state.cache.cards = cards;
             state.cache.people = people;
             state.cache.tags = tags;
+
+            // Phase 16A-1: Generate ML Cache over recent 500 items
+            const recentTxs = txs.sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 500);
+            state.cache.transactions = recentTxs;
+
+            const hMap = {};
+            for (const t of recentTxs) {
+                const norm = normalizeStr(t.description);
+                if (norm && !hMap[norm]) { // first seen is newest
+                    hMap[norm] = {
+                        categoryId: t.categoryId,
+                        subcategoryId: t.subcategoryId,
+                        tags: t.tags || [],
+                        cardType: t.cardType || "fisico",
+                        payerRole: t.payerRole || "main",
+                        personId: t.personId
+                    };
+                }
+            }
+            state.cache.historyMap = hMap;
+
         } catch (e) {
             console.error(e);
             container.innerHTML = `<div class="card error">Erro ao carregar dados: ${e.message}</div>`;
@@ -209,12 +233,28 @@ function renderStep1(cnt) {
 
                     state.rows = ruleResults.map(res => {
                         const r = res.draftTx; // Modified draft
-                        // Preserve original props not in draftTx if any? 
-                        // applyRulesToDraft returns a copy of input. 
-                        // But input was state.rows elem. So it should be fine.
-
                         // Add metadata for UI
                         r.appliedRules = res.appliedRuleIds;
+
+                        // Phase 16A-1: Confidence Level & ML Suggestion
+                        if (r.appliedRules && r.appliedRules.length > 0) {
+                            r.confidence = 'alta';
+                        } else {
+                            const norm = normalizeStr(r.description);
+                            const histMatch = state.cache.historyMap[norm];
+                            if (histMatch && histMatch.categoryId) {
+                                r.confidence = 'media';
+                                r.categoryId = histMatch.categoryId || r.categoryId;
+                                r.subcategoryId = histMatch.subcategoryId || r.subcategoryId;
+                                r.cardType = histMatch.cardType || r.cardType;
+                                r.payerRole = histMatch.payerRole || r.payerRole;
+                                r.personId = histMatch.personId || r.personId;
+                                r.tags = histMatch.tags || r.tags;
+                            } else {
+                                r.confidence = 'baixa';
+                            }
+                        }
+
                         return r;
                     });
 
@@ -339,9 +379,16 @@ function renderStep2(cnt) {
             tr.className = r.warnings.length ? "warning-row" : "";
             if (r.warnings.length) tr.title = r.warnings.join("\n");
 
-            // Auto-classification indicator
-            const isAuto = r.appliedRules && r.appliedRules.length > 0;
-            const autoBadge = isAuto ? `<span title="Classificado automaticamente por regra" style="color:blue; font-weight:bold; font-size:10px;">★ Auto</span>` : "";
+            // Auto-classification indicator (Phase 16A-1 ML Trust Score)
+            let autoBadge = "";
+            let rowColor = "";
+            if (r.confidence === 'alta') {
+                autoBadge = `<span title="Confiança Alta (Regra exata aplicada)" style="color:white; background:green; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">★ ALTA</span>`;
+            } else if (r.confidence === 'media') {
+                autoBadge = `<span title="Confiança Média (Sugerido pelo Histórico)" style="color:white; background:#ff9800; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">💡 MÉDIA</span>`;
+            } else {
+                autoBadge = `<span title="Confiança Baixa (Nova Despesa / Desconhecida)" style="color:#999; border:1px solid #ccc; padding:1px 4px; border-radius:3px; font-size:9px; vertical-align:middle;">BAIXA</span>`;
+            }
 
             const catOptions = genOpts(state.cache.categories, r.categoryId);
             const subOptions = getSubOpts(r.categoryId, r.subcategoryId);
@@ -528,11 +575,12 @@ function renderStepBatchReview(cnt) {
             <div style="margin-top:10px; display:flex; gap:10px; justify-content:space-between;">
                 <!-- Advanced Smart Actions -->
                  <div style="display:flex; gap:5px;">
-                    <button id="btnSimilar" style="background:#6c757d; font-size:11px;" title="Selecione 1 item para usar como modelo">🔁 Aplicar a Semelhantes</button>
-                    <button id="btnSaveRule" style="background:#ffc107; color:black; font-size:11px;" title="Selecione 1 item para criar regra">⭐ Salvar como Regra</button>
+                    <button id="btnConfirmSuggested" style="background:#28a745; color:white; font-size:11px; border:none; border-radius:3px; cursor:pointer;" title="Confirmar Sugestões de Alta Confiança">✓ Confirmar Alta Confiança</button>
+                    <button id="btnSimilar" style="background:#6c757d; color:white; font-size:11px; border:none; border-radius:3px; cursor:pointer;" title="Selecione 1 item para usar como modelo">🔁 Aplicar a Semelhantes</button>
+                    <button id="btnSaveRule" style="background:#ffc107; color:black; font-size:11px; border:none; border-radius:3px; cursor:pointer;" title="Selecione 1 item para criar regra">⭐ Salvar como Regra</button>
                 </div>
                 
-                <button id="btnBatchApply" style="background:#17a2b8; color:white;">Aplicar Alterações (Seleção)</button>
+                <button id="btnBatchApply" style="background:#17a2b8; color:white; border:none; padding:5px 10px; border-radius:3px;">Aplicar Alterações (Seleção)</button>
             </div>
         </div>
 
@@ -563,6 +611,34 @@ function renderStepBatchReview(cnt) {
             <button class="backBtn" style="background:#888;">« Voltar (Seleção)</button>
             <button class="nextBtn">Próximo: Destino »</button>
         </div>
+
+        <!-- NEW RULE MODAL (Phase 16A-1) -->
+        <dialog id="dlgRule" style="padding:20px; border-radius:8px; border:1px solid #ccc; width:90%; max-width:400px;">
+            <h3 style="margin-top:0;">🌟 Salvar como Regra Inteligente</h3>
+            <div class="form grid">
+                <label>Termo Principal (A descrição precisa conter):
+                    <input type="text" id="dlgRuleMatch" required />
+                </label>
+                <label>Nome da Regra:
+                    <input type="text" id="dlgRuleName" required />
+                </label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <label>Prioridade (0 é mais alta)
+                        <input type="number" id="dlgRulePriority" value="10" />
+                    </label>
+                    <label>Sobrescrever dados?
+                        <select id="dlgRuleOverwrite">
+                            <option value="false">Não</option>
+                            <option value="true">Sim</option>
+                        </select>
+                    </label>
+                </div>
+                <div style="margin-top:15px; display:flex; gap:10px; justify-content:flex-end;">
+                    <button type="button" id="dlgRuleCancel" style="background:#dc3545; color:white;">Cancelar</button>
+                    <button type="button" id="dlgRuleSave" style="background:#28a745; color:white;">💾 Salvar Regra</button>
+                </div>
+            </div>
+        </dialog>
     `;
 
     // --- HANDLERS ---
@@ -698,63 +774,99 @@ function renderStepBatchReview(cnt) {
         cnt.querySelector("#previewBody").innerHTML = renderBatchPreviewRows();
     };
 
+    cnt.querySelector("#btnConfirmSuggested").onclick = () => {
+        let count = 0;
+        state.rows.forEach(r => {
+            if (r.confidence === 'alta') {
+                r.confidence = 'confirmed_alta'; // Mark as manually reviewed
+                count++;
+            }
+        });
+        alert(`Sugestões de Alta Confiança confirmadas e aplicadas ativamente em ${count} linhas.`);
+        cnt.querySelector("#previewBody").innerHTML = renderBatchPreviewRows();
+    };
+
     cnt.querySelector("#btnSaveRule").onclick = async () => {
         const ref = getSingleSelected();
         if (!ref) return;
 
-        const defaultName = ref.description.trim();
-        const ruleName = prompt("Nome da Nova Regra:", defaultName);
-        if (!ruleName) return;
+        const dlg = cnt.querySelector("#dlgRule");
+        const iMatch = cnt.querySelector("#dlgRuleMatch");
+        const iName = cnt.querySelector("#dlgRuleName");
 
-        const matchTerm = prompt("Termo para identificar (Descrição contém):", normalizeStr(ref.description));
-        if (!matchTerm) return;
+        iMatch.value = normalizeStr(ref.description);
+        iName.value = ref.description.trim() + " (Auto)";
 
-        // Check duplicates? (Optimistic)
-        // Construction rule object
-        const newRule = {
-            id: uid("rule"),
-            name: ruleName,
-            priority: 10,
-            active: true,
-            match: {
-                descriptionIncludes: matchTerm
-            },
-            actions: {
-                categoryId: ref.categoryId || "",
-                subcategoryId: ref.subcategoryId || "",
-                tags: ref.tags ? ref.tags.split(",").map(t => t.trim()) : [],
-                personId: ref.personId || ""
-            },
-            options: {
-                overwrite: confirm("Sobrescrever dados existentes quando aplicar esta regra?")
+        dlg.showModal();
+
+        cnt.querySelector("#dlgRuleCancel").onclick = () => dlg.close();
+        cnt.querySelector("#dlgRuleSave").onclick = async () => {
+            const ruleName = iName.value.trim();
+            const matchTerm = iMatch.value.trim();
+            if (!ruleName || !matchTerm) return alert("Preencha o Termo e o Nome.");
+
+            const newRule = {
+                id: uid("rule"),
+                name: ruleName,
+                priority: parseInt(cnt.querySelector("#dlgRulePriority").value) || 10,
+                active: true,
+                match: {
+                    descriptionIncludes: matchTerm
+                },
+                actions: {
+                    categoryId: ref.categoryId || "",
+                    subcategoryId: ref.subcategoryId || "",
+                    tags: ref.tags ? (Array.isArray(ref.tags) ? ref.tags : ref.tags.split(",").map(t => t.trim())) : [],
+                    personId: ref.personId || ""
+                },
+                options: {
+                    overwrite: cnt.querySelector("#dlgRuleOverwrite").value === "true"
+                }
+            };
+
+            try {
+                await put("rules", newRule);
+                alert("Regra salva com sucesso! Os próximos imports já a utilizarão.");
+                dlg.close();
+
+                // Optional: Recalculate visually on the current preview?
+                // Too complex for right now, the user usually just wants it saved for next time.
+            } catch (e) {
+                alert("Erro ao salvar regra: " + e.message);
             }
         };
-
-        try {
-            await put("rules", newRule);
-            alert("Regra salva com sucesso!");
-        } catch (e) {
-            alert("Erro ao salvar regra: " + e.message);
-        }
     };
 }
 
 function renderBatchPreviewRows() {
-    // Show only selected? Or all?
-    // "Revisar Importação" usually implies checking what will be imported.
-    // So filter by selected.
     return state.rows.filter(r => r.selected).slice(0, 100).map(r => {
         const catName = state.cache.categories.find(c => c.id === r.categoryId)?.name || "-";
         const subName = state.cache.subcategories.find(s => s.id === r.subcategoryId)?.name || "-";
 
+        let badgeTitle = "Revisão Padrão";
+        let badgeIcon = '<span style="color:#ccc">○</span>';
+
+        if (r.confidence === 'alta') {
+            const ruleId = r.appliedRuleIds && r.appliedRuleIds.length > 0 ? r.appliedRuleIds[0] : null;
+            const rName = ruleId ? state.cache.rules.find(rx => rx.id === ruleId)?.name : "(Regra Padrão)";
+            badgeTitle = `Alta Confiança — Aplicou: ${rName}`;
+            badgeIcon = `<span style="color:green; font-weight:bold" title="${esc(badgeTitle)}">★</span>`;
+        } else if (r.confidence === 'media') {
+            badgeTitle = "Sugestão baseada no Histórico Recente";
+            badgeIcon = `<span style="color:#ff9800; font-weight:bold" title="${esc(badgeTitle)}">💡</span>`;
+        } else if (r.confidence === 'confirmed_alta') {
+            badgeTitle = "Confirmado Manualmente";
+            badgeIcon = `<span style="color:blue; font-weight:bold" title="${esc(badgeTitle)}">✔</span>`;
+        }
+
         return `
             <tr style="border-bottom:1px solid #eee;">
-                <td style="text-align:center; color:green;">✔</td>
+                <td style="text-align:center;">${badgeIcon}</td>
                 <td>${r.date}</td>
                 <td>${esc(r.description)}</td>
                 <td>${r.value.toFixed(2)}</td>
                 <td>${esc(catName)} > ${esc(subName)}</td>
-                <td>${esc(r.tags || "")}</td>
+                <td>${esc(Array.isArray(r.tags) ? r.tags.join(",") : (r.tags || ""))}</td>
             </tr>
          `;
     }).join("") + (state.rows.filter(r => r.selected).length > 100 ? '<tr><td colspan="6" style="text-align:center; color:#999;">...e mais itens...</td></tr>' : '');
@@ -794,6 +906,11 @@ function renderStepDestination(cnt) {
                      </select>
                 </label>
             </div>
+            <div class="form grid" style="margin-top:10px;">
+                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Faturas Internacionais)
+                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
+                </label>
+            </div>
         </div>
 
         <div style="margin-top:20px; text-align:right; display:flex; gap:10px; justify-content:flex-end;">
@@ -801,6 +918,23 @@ function renderStepDestination(cnt) {
             <button class="nextBtn" style="background:#28a745; color:white; font-weight:bold;">CONFIRMAR E PROCESSAR »</button>
         </div>
     `;
+
+    const dstCard = cnt.querySelector("#dstCard");
+    const wrpFx = cnt.querySelector("#wrapperFxRate");
+
+    // Check initial state
+    const initC = state.cache.cards.find(x => x.id === dstCard.value);
+    if (initC && initC.currency === "USD") wrpFx.style.display = "block";
+
+    dstCard.onchange = () => {
+        const c = state.cache.cards.find(x => x.id === dstCard.value);
+        if (c && c.currency === "USD") {
+            wrpFx.style.display = "block";
+        } else {
+            wrpFx.style.display = "none";
+            cnt.querySelector("#dstFxRate").value = "";
+        }
+    };
 
     cnt.querySelector(".backBtn").onclick = () => {
         // Save state values before going back?
@@ -820,6 +954,16 @@ function renderStepDestination(cnt) {
         state.dest.cardId = cardId;
         state.dest.invoiceMonth = mon;
         state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+
+        const c = state.cache.cards.find(x => x.id === cardId);
+        if (c && c.currency === "USD") {
+            const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
+            state.dest.fxRate = isNaN(fx) ? null : fx;
+            state.dest.isUSD = true;
+        } else {
+            state.dest.fxRate = null;
+            state.dest.isUSD = false;
+        }
 
         state.step = 5; // Go to Processing
         renderDispatcher(cnt);
@@ -856,6 +1000,13 @@ async function startImportProcess(cnt) {
     const selected = state.rows.filter(r => r.selected);
     const total = selected.length;
     let processed = 0;
+
+    // Config needed for fallback fx rates
+    let usdRateGlob = 5.0;
+    if (state.dest.isUSD) {
+        const cfg = await get("settings", "config");
+        if (cfg && cfg.usdRate) usdRateGlob = parseFloat(cfg.usdRate);
+    }
 
     // Chunk processing
     const BATCH_SIZE = 50;
@@ -897,6 +1048,13 @@ async function startImportProcess(cnt) {
             // If they selected "additional", usage is physical usually, but role is additional.
             // The UI logic is split: Type (Physical/Virtual) vs Payer (Main/Additional).
             // Schema likely expects cardHolder to be 'main' or 'additional'.
+
+            if (state.dest.isUSD) {
+                const finalRate = state.dest.fxRate || usdRateGlob;
+                tx.currency = "USD";
+                tx.fxRate = finalRate;
+                tx.valueBRL = tx.value * finalRate;
+            }
 
             await put("transactions", tx);
         }));

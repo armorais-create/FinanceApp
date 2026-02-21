@@ -235,8 +235,17 @@ async function renderInvoiceView(cards, accounts) {
 
             <!-- Campos extras para USD -->
             <div id="usdFields" style="display:none; background:#eee; padding:5px; margin:5px 0;">
-                <label>Valor em USD <input type="number" name="amountUSD" step="0.01" id="editAmountUSD" /></label>
-                <label>Cotação (R$) <input type="number" name="exchangeRate" step="0.001" id="editExchangeRate" /></label>
+                <label>Valor Original (USD) <input type="number" name="amountUSD" step="0.01" id="editAmountUSD" /></label>
+                <label>Taxa Base Usada <input type="number" name="exchangeRate" step="0.0001" id="editExchangeRate" /></label>
+                
+                <div id="editFxBlock" style="display:none; grid-column:span 2; background:#e1f0fa; padding:10px; border-radius:4px; font-size:11px; margin-top:5px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div id="editFxLabel">Estado: R$ 0.00 (Flutuante)</div>
+                        <button type="button" id="btnFixFx" style="font-size:10px; padding:4px 8px; background:#17a2b8; color:white; border:none; border-radius:3px;">Fixar Taxa Interna</button>
+                        <button type="button" id="btnUnfixFx" style="font-size:10px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:3px; display:none;">Descongelar</button>
+                        <input type="hidden" name="fxRateTracker" id="fxRateTracker" />
+                    </div>
+                </div>
             </div>
 
             <label>Quem Paga <select name="personId">${peopleOpts}</select></label>
@@ -535,6 +544,20 @@ export async function wireInvoiceHandlers(rootEl) {
                 tags: fd.get("tags") ? fd.get("tags").split(",").map(s => s.trim()) : []
             };
 
+            const trackedFx = fd.get("fxRateTracker");
+            if (trackedFx === "fixed") {
+                const originalDataRaw = editDialog.dataset.origTx;
+                if (originalDataRaw) {
+                    const otx = JSON.parse(originalDataRaw);
+                    if (otx.currency === "USD" && !otx.fxRate) {
+                        // Uses the values present in the form fields. (Updates object).
+                        updates.fxRate = updates.valueBRL / (updates.amountUSD || Math.max(0.01, (parseFloat(otx.value) / (otx.fxRate || 5))));
+                    }
+                }
+            } else if (trackedFx === "unfixed") {
+                updates.fxRate = null;
+            }
+
             await updateTransaction(id, updates);
             editDialog.close();
             refreshInvoice(rootEl);
@@ -575,6 +598,44 @@ function openEditDialog(rootEl, tx) {
         currSel.dispatchEvent(event);
     }
 
+    // Connect Fx tracking view to display
+    const fxBlock = f.querySelector("#editFxBlock");
+    const valBRLText = f.querySelector("#editFxLabel");
+    const btnFix = f.querySelector("#btnFixFx");
+    const btnUnfix = f.querySelector("#btnUnfixFx");
+    const tracker = f.querySelector("#fxRateTracker");
+    if (tracker) tracker.value = ""; // reset
+
+    if (cur === "USD" && fxBlock) {
+        fxBlock.style.display = "block";
+        const isFixed = parseFloat(tx.fxRate) > 0;
+
+        valBRLText.innerHTML = `<small style='color:#666'>(${isFixed ? "<b>Câmbio Congelado</b>" : "Flutuante/Global"})</small>`;
+
+        if (isFixed) {
+            btnFix.style.display = "none";
+            btnUnfix.style.display = "inline-block";
+        } else {
+            btnFix.style.display = "inline-block";
+            btnUnfix.style.display = "none";
+        }
+
+        btnFix.onclick = () => {
+            tracker.value = "fixed";
+            btnFix.style.display = "none";
+            valBRLText.innerHTML += " <strong style='color:green'>(Será Fixada!)</strong>";
+        };
+
+        btnUnfix.onclick = () => {
+            tracker.value = "unfixed";
+            btnUnfix.style.display = "none";
+            valBRLText.innerHTML += " <strong style='color:red'>(Será Descongelada!)</strong>";
+        };
+    } else if (fxBlock) {
+        fxBlock.style.display = "none";
+    }
+
+    d.dataset.origTx = JSON.stringify(tx);
     d.showModal();
 }
 

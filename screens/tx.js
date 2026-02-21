@@ -101,8 +101,10 @@ export async function txScreen() {
                 <span id="currencyLabel">BRL</span>
             </div>
             
-            <div id="conversionPreview" class="small" style="grid-column: span 2; display:none; color: #666;">
-                Câmbio: ${settings.usdRate} | Aproximadamente <strong id="brlPreview">R$ 0,00</strong>
+            <div id="conversionPreview" class="small" style="grid-column: span 2; display:none; gap:10px; align-items:center; color: #666;">
+                <div>Câmbio USD:</div>
+                <input type="number" name="fxRate" id="fxRateInput" step="0.0001" placeholder="${settings.usdRate}" style="width:80px; padding:2px; font-size:11px;" />
+                <div>| Aproximadamente <strong id="brlPreview">R$ 0,00</strong></div>
             </div>
 
             <button type="submit" style="grid-column: span 2;">Salvar</button>
@@ -141,6 +143,17 @@ export async function txScreen() {
                     ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
                 </select>
             </label>
+
+            <!-- USD Fix Rate Block -->
+            <div id="editFxBlock" style="display:none; grid-column:span 2; background:#e1f0fa; padding:10px; border-radius:4px; font-size:11px;">
+                <div style="font-weight:bold; color:#0056b3;">Transação Internacional (USD)</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px;">
+                    <div id="editFxLabel">Taxa Usada: R$ 0.00 (Flutuante)</div>
+                    <button type="button" id="btnFixFx" style="font-size:10px; padding:4px 8px; background:#17a2b8; color:white; border:none; border-radius:3px;">Fixar Taxa Atual</button>
+                    <button type="button" id="btnUnfixFx" style="font-size:10px; padding:4px 8px; background:#dc3545; color:white; border:none; border-radius:3px; display:none;">Descongelar</button>
+                    <input type="hidden" name="fxRateTracker" id="fxRateTracker" />
+                </div>
+            </div>
 
             <!-- Card Specifics -->
             <label>Portador 
@@ -348,19 +361,23 @@ export async function wireTxHandlers(rootEl) {
 
     toggleMethod();
 
-    if (valueInput) {
-        valueInput.addEventListener("input", () => {
-            const cur = currencyLabel.innerText;
-            if (cur === "USD") {
-                const val = parseFloat(valueInput.value) || 0;
-                const brl = val * settings.usdRate;
-                brlPreview.innerText = `R$ ${brl.toFixed(2)}`;
-                conversionPreview.style.display = "block";
-            } else {
-                conversionPreview.style.display = "none";
-            }
-        });
-    }
+    const fxRateInput = form.querySelector("#fxRateInput");
+
+    const updatePreview = () => {
+        const cur = currencyLabel.innerText;
+        if (cur === "USD") {
+            const val = parseFloat(valueInput.value) || 0;
+            const fxRate = parseFloat(fxRateInput?.value) || settings.usdRate;
+            const brl = val * fxRate;
+            brlPreview.innerText = `R$ ${brl.toFixed(2)}`;
+            conversionPreview.style.display = "flex";
+        } else {
+            conversionPreview.style.display = "none";
+        }
+    };
+
+    if (valueInput) valueInput.addEventListener("input", updatePreview);
+    if (fxRateInput) fxRateInput.addEventListener("input", updatePreview);
 
     form.onsubmit = async (e) => {
         e.preventDefault();
@@ -502,8 +519,14 @@ export async function wireTxHandlers(rootEl) {
         };
 
         if (cur === "USD") {
-            tx.valueBRL = val * settings.usdRate;
-            tx.fxRate = settings.usdRate;
+            const rawFx = fd.get("fxRate");
+            const parsedFx = parseFloat(rawFx);
+            if (!isNaN(parsedFx) && parsedFx > 0) {
+                tx.fxRate = parsedFx;
+                tx.valueBRL = val * parsedFx;
+            } else {
+                tx.valueBRL = val * settings.usdRate;
+            }
         }
 
         if (method === "account") {
@@ -589,7 +612,26 @@ export async function wireTxHandlers(rootEl) {
             if (fd.get("invoiceMonth")) updates.invoiceMonth = fd.get("invoiceMonth");
             if (fd.get("accountId")) updates.accountId = fd.get("accountId");
             if (fd.get("cardHolder")) updates.cardHolder = fd.get("cardHolder");
-            if (fd.get("cardType")) updates.cardType = fd.get("cardType"); // if we tracked cardId in edit? We might need hidden input for cardId or select. Dialog assumes simple edits. Let's add accountId support at least.
+            if (fd.get("cardType")) updates.cardType = fd.get("cardType");
+
+            // Fx Rate Tracking
+            const trackedFx = fd.get("fxRateTracker");
+            if (trackedFx === "fixed") {
+                // User clicked to fix a floating rate during this edit window
+                // Wait, what if they were already fixed? That means they clicked nothing, trackedFx="fixed" will be saved.
+                // We don't have to recalculate BRL, we just persist fxRate so the Engine ignores it later.
+                // So we need the original tx.valueBRL to compute the exact fx.
+                const originalDataRaw = editD.dataset.origTx;
+                if (originalDataRaw) {
+                    const otx = JSON.parse(originalDataRaw);
+                    if (otx.currency === "USD" && !otx.fxRate) {
+                        const currentValBRL = parseFloat(otx.valueBRL) || (parseFloat(otx.value) * (settings.usdRate || 5.0)); // Fallback
+                        updates.fxRate = currentValBRL / parseFloat(otx.value);
+                    }
+                }
+            } else if (trackedFx === "unfixed") {
+                updates.fxRate = null; // Unfix
+            }
 
             // Note: Preventing overwriting other fields not in form? No, updateTransaction merges.
 
@@ -620,6 +662,45 @@ function openEditDialog(rootEl, tx) {
     const impInv = f.querySelector("[name=invoiceMonth]");
     if (impInv) impInv.value = tx.invoiceMonth || "";
 
+    // -- FX Logic --
+    const fxBlock = f.querySelector("#editFxBlock");
+    const valBRLText = f.querySelector("#editFxLabel");
+    const btnFix = f.querySelector("#btnFixFx");
+    const btnUnfix = f.querySelector("#btnUnfixFx");
+    const tracker = f.querySelector("#fxRateTracker");
+    tracker.value = ""; // reset
+
+    if (tx.currency === "USD") {
+        fxBlock.style.display = "block";
+        const isFixed = parseFloat(tx.fxRate) > 0;
+        const currentRate = isFixed ? tx.fxRate : ((tx.valueBRL || 0) / tx.value);
+
+        valBRLText.innerHTML = `Taxa: R$ ${currentRate.toFixed(4)} <br/> <small style='color:#666'>(${isFixed ? "Fixada/Congelada" : "Flutuante/Global"})</small>`;
+
+        if (isFixed) {
+            btnFix.style.display = "none";
+            btnUnfix.style.display = "inline-block";
+        } else {
+            btnFix.style.display = "inline-block";
+            btnUnfix.style.display = "none";
+        }
+
+        btnFix.onclick = () => {
+            tracker.value = "fixed";
+            btnFix.style.display = "none";
+            valBRLText.innerHTML += " <strong style='color:green'>(Será Fixada!)</strong>";
+        };
+
+        btnUnfix.onclick = () => {
+            tracker.value = "unfixed";
+            btnUnfix.style.display = "none";
+            valBRLText.innerHTML += " <strong style='color:red'>(Será Descongelada!)</strong>";
+        };
+    } else {
+        fxBlock.style.display = "none";
+    }
+
+    d.dataset.origTx = JSON.stringify(tx);
     d.showModal();
 }
 

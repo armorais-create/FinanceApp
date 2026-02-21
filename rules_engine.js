@@ -30,18 +30,60 @@ export function applyRulesToDraft(draftTx, rules, subcategories = []) {
         if (!rule.match) continue;
 
         // 2. Check Match
-        let isMatch = false;
+        let isMatch = true;
 
-        // "Description Includes" (Case Insensitive)
-        if (rule.match.descriptionIncludes) {
-            const term = rule.match.descriptionIncludes.toLowerCase();
-            if (term && desc.includes(term)) {
-                isMatch = true;
+        // "Description Includes" (Legacy) -> Promote to anyIncludes
+        let anyInc = [];
+        if (Array.isArray(rule.match.anyIncludes)) {
+            anyInc = [...rule.match.anyIncludes];
+        } else if (typeof rule.match.anyIncludes === 'string') {
+            anyInc = rule.match.anyIncludes.split(",").map(t => t.trim()).filter(Boolean);
+        }
+
+        if (rule.match.descriptionIncludes && typeof rule.match.descriptionIncludes === 'string') {
+            if (!anyInc.includes(rule.match.descriptionIncludes)) {
+                anyInc.push(rule.match.descriptionIncludes);
             }
         }
 
-        // "Description Regex" (Future)
-        // if (!isMatch && rule.match.descriptionRegex) ...
+        // anyIncludes (OR)
+        if (anyInc.length > 0) {
+            isMatch = anyInc.some(term => term && desc.includes(term.toLowerCase()));
+        }
+
+        // allIncludes (AND)
+        if (isMatch && rule.match.allIncludes) {
+            let allInc = Array.isArray(rule.match.allIncludes) ? rule.match.allIncludes : rule.match.allIncludes.split(",").map(t => t.trim()).filter(Boolean);
+            if (allInc.length > 0) {
+                isMatch = allInc.every(term => term && desc.includes(term.toLowerCase()));
+            }
+        }
+
+        // noneIncludes (NOT)
+        if (isMatch && rule.match.noneIncludes) {
+            let noneInc = Array.isArray(rule.match.noneIncludes) ? rule.match.noneIncludes : rule.match.noneIncludes.split(",").map(t => t.trim()).filter(Boolean);
+            if (noneInc.length > 0) {
+                const hasForbidden = noneInc.some(term => term && desc.includes(term.toLowerCase()));
+                if (hasForbidden) isMatch = false;
+            }
+        }
+
+        // Account ID match
+        if (isMatch && rule.match.accountId && rule.match.accountId !== tx.accountId) {
+            isMatch = false;
+        }
+
+        // Card ID match
+        if (isMatch && rule.match.cardId && rule.match.cardId !== tx.cardId) {
+            isMatch = false;
+        }
+
+        // Amount BRL Range
+        if (isMatch && (rule.match.minAmountBRL !== undefined || rule.match.maxAmountBRL !== undefined)) {
+            const val = Math.abs(tx.valueBRL !== undefined ? tx.valueBRL : (tx.value || 0)); // rule engine works with absolute values typically
+            if (rule.match.minAmountBRL !== undefined && val < rule.match.minAmountBRL) isMatch = false;
+            if (rule.match.maxAmountBRL !== undefined && val > rule.match.maxAmountBRL) isMatch = false;
+        }
 
         if (!isMatch) continue;
 

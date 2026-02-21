@@ -30,11 +30,16 @@ export async function settingsScreen() {
     <div><strong>Backup & Dados</strong></div>
     <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
         <div style="display:flex; gap:5px;">
-             <button id="btnExport" style="flex:1">⬇️ Exportar</button>
-             <button id="btnImport" style="flex:1">⬆️ Importar</button>
+             <button id="btnExport" style="flex:1" class="secondary small">Gerar .json</button>
+             <button id="btnImport" style="flex:1" class="secondary small">Ler .json</button>
+        </div>
+        <div style="display:flex; gap:5px;">
+             <button id="btnExportPack" style="flex:1; background:#007bff; color:white;">⚡ Export rápido</button>
+             <button id="btnImportPack" style="flex:1; background:#28a745; color:white;">⚡ Import rápido</button>
         </div>
         <button id="btnReset" class="danger small" style="width:100%">⚠️ Resetar App</button>
         <input type="file" id="importFile" accept=".json" style="display:none" />
+        <input type="file" id="importPackFile" accept=".financeapp,.json" style="display:none" />
     </div>
   </div>`;
     }
@@ -47,61 +52,113 @@ export async function settingsScreen() {
         <form id="ruleForm" class="form grid" style="margin-top:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
              <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="ruleFormTitle">Nova Regra</strong>
-                 <button type="button" id="btnCancelEditRule" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar Edição</button>
+                 <div style="display:flex; gap:5px;">
+                     <button type="button" id="btnTestRule" style="padding:2px 8px; font-size:0.8em; background:#17a2b8; color:white; border:none; border-radius:3px; display:none;">🧪 Simular Regra</button>
+                     <button type="button" id="btnCancelEditRule" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar Edição</button>
+                 </div>
              </div>
              
              <input type="hidden" name="id" /> <!-- For editing -->
 
-             <input name="name" placeholder="Nome da Regra (ex: Uber)" required />
-             
-             <div style="display:flex; gap:5px;">
-                <input name="priority" type="number" placeholder="Prioridade (0=Alta)" style="width:120px" value="10" />
-                <label style="display:flex; align-items:center; gap:5px; font-size:0.9em;">
-                    <input type="checkbox" name="enabled" checked /> Ativa
-                </label>
+             <div class="grid" style="grid-template-columns: 2fr 1fr; gap:5px;">
+                 <input name="name" placeholder="Nome da Regra (ex: Uber)" required />
+                 <div style="display:flex; gap:5px; align-items:center;">
+                    <input name="priority" type="number" placeholder="Prioridade (0=Alta)" style="width:100%" value="10" />
+                    <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; white-space:nowrap;">
+                        <input type="checkbox" name="enabled" checked /> Ativa
+                    </label>
+                 </div>
              </div>
 
-             <label>Se descrição contém (texto):
-                <input name="matchIncludes" placeholder="ex: uber, 99pop" required />
-             </label>
+             <div style="margin-top:5px; font-weight:bold; font-size:0.9em; border-bottom:1px solid #ddd; padding-bottom:5px;">Condições de Match (Filtros)</div>
+             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
+                 <label class="small">Pode conter qualquer (OR):
+                    <input name="ruleAnyIncludes" placeholder="ex: uber, 99pop" style="width:100%" />
+                 </label>
+                 <label class="small">Deve conter TODAS (AND):
+                    <input name="ruleAllIncludes" placeholder="ex: viag, internacional" style="width:100%" />
+                 </label>
+                 <label class="small">Não pode conter (NOT):
+                    <input name="ruleNoneIncludes" placeholder="ex: estorno, cancelado" style="width:100%" />
+                 </label>
+                 <label class="small">Faixa de Valor BRL (Mín - Máx):
+                    <div style="display:flex; gap:5px;">
+                        <input type="number" name="ruleMinAmount" placeholder="Mín" style="width:50%" />
+                        <input type="number" name="ruleMaxAmount" placeholder="Máx" style="width:50%" />
+                    </div>
+                 </label>
+                 <label class="small">Restringir ao Cartão:
+                    <select name="ruleCardId" style="width:100%">
+                        <option value="">(Qualquer Cartão)</option>
+                        ${cards.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
+                    </select>
+                 </label>
+                 <label class="small">Restringir à Conta:
+                    <select name="ruleAccountId" style="width:100%">
+                        <option value="">(Qualquer Conta)</option>
+                        ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
+                    </select>
+                 </label>
+             </div>
 
              <!-- Actions -->
-             <div style="margin-top:5px; font-weight:bold; font-size:0.9em;">Aplicar:</div>
-             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                 <select name="actionCategory" id="ruleActionCategory">
-                    <option value="">(Manter Categoria)</option>
-                    ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
-                 </select>
+             <div style="margin-top:5px; font-weight:bold; font-size:0.9em; border-bottom:1px solid #ddd; padding-bottom:5px;">Ações Aplicadas</div>
+             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
+                 <label class="small">Categoria:
+                     <select name="actionCategory" id="ruleActionCategory" style="width:100%">
+                        <option value="">(Manter Categoria)</option>
+                        ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
+                     </select>
+                 </label>
 
-                 <select name="actionSubcategory" id="ruleActionSubcategory" disabled>
-                    <option value="">(Manter Subcategoria)</option>
-                 </select>
+                 <label class="small">Subcategoria:
+                     <select name="actionSubcategory" id="ruleActionSubcategory" disabled style="width:100%">
+                        <option value="">(Manter Subcategoria)</option>
+                     </select>
+                 </label>
                  
-                 <select name="actionPerson">
-                    <option value="">(Manter Pessoa)</option>
-                    ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
-                 </select>
+                 <label class="small">Pessoa:
+                     <select name="actionPerson" style="width:100%">
+                        <option value="">(Manter Pessoa)</option>
+                        ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
+                     </select>
+                 </label>
 
-                 <input name="actionTags" placeholder="Add Tags (separar por vírgula)" />
-                 
-                 <label style="display:flex; align-items:center; gap:5px; font-size:0.9em;">
-                    <input type="checkbox" name="overwrite" /> Sobrescrever dados?
-                </label>
+                 <label class="small">Tags (separar por vírgula):
+                    <input name="actionTags" placeholder="Add Tags" style="width:100%" />
+                 </label>
              </div>
+                 
+             <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
+                <input type="checkbox" name="overwrite" /> Sobrescrever dados nas linhas já preenchidas? (Agressivo)
+            </label>
 
-             <button type="submit" id="btnSaveRule" style="margin-top:5px;">Salvar Regra</button>
+             <button type="submit" id="btnSaveRule" style="margin-top:10px; background:#28a745;">💾 Salvar Regra</button>
         </form>
 
         <div style="margin-top:15px;" id="rulesListContainer">
             ${rules.length === 0 ? '<div class="small">Nenhuma regra definida.</div>' : ''}
             <ul class="list">
-                ${rules.map(r => `
+                ${rules.map(r => {
+      // Build Rich Summary
+      let conds = [];
+      const m = r.match || {};
+      const anyI = m.anyIncludes || (m.descriptionIncludes ? [m.descriptionIncludes] : []);
+      if (anyI.length) conds.push(`Pode: [${anyI.join(", ")}]`);
+      if (m.allIncludes && m.allIncludes.length) conds.push(`Deve: [${m.allIncludes.join(", ")}]`);
+      if (m.noneIncludes && m.noneIncludes.length) conds.push(`Não Pode: [${m.noneIncludes.join(", ")}]`);
+      if (m.cardId) conds.push(`🪙 Cartão: ${cards.find(c => c.id === m.cardId)?.name || '?'}`);
+      if (m.accountId) conds.push(`🏦 Conta: ${accounts.find(a => a.id === m.accountId)?.name || '?'}`);
+      if (m.minAmountBRL || m.maxAmountBRL) conds.push(`💲 R$ ${m.minAmountBRL || 0} a ${m.maxAmountBRL || '∞'}`);
+      const summary = conds.join(" | ") || "Sem condição (Aplica em tudo)";
+
+      return `
                     <li class="listItem" style="display:block;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div style="flex:1" class="clickable" data-action="edit-rule" data-rule="${esc(JSON.stringify(r))}">
-                                <span style="font-weight:bold; ${!r.enabled ? 'text-decoration:line-through; color:#999;' : ''}">${esc(r.priority)}: ${esc(r.name)}</span>
-                                <div class="small">Contém: "${esc(r.match?.descriptionIncludes)}"</div>
-                                <div class="small" style="color:#666">
+                                <span style="font-weight:bold; color: #17a2b8; ${!r.enabled ? 'text-decoration:line-through; color:#999;' : ''}">[${esc(r.priority)}] ${esc(r.name)}</span>
+                                <div class="small" style="font-weight:bold; color:#444;">${esc(summary)}</div>
+                                <div class="small" style="color:#666; margin-top:3px;">
                                     ${r.actions?.categoryId ? `➡ Cat: ${categories.find(c => c.id === r.actions.categoryId)?.name}` : ""}
                                     ${r.actions?.subcategoryId ? ` > Sub: ${subcategories.find(s => s.id === r.actions.subcategoryId)?.name}` : ""}
                                     ${r.actions?.tags?.length ? `➡ Tags: ${r.actions.tags.join(", ")}` : ""}
@@ -113,10 +170,48 @@ export async function settingsScreen() {
                             </div>
                         </div>
                     </li>
-                `).join("")}
+                    `
+    }).join("")}
             </ul>
         </div>
     </div>
+    
+    <!-- Phase 16A-2 Modal Rule Simulator -->
+    <dialog id="modalTestRule" style="padding:20px; border-radius:8px; border:1px solid #ccc; width:95%; max-width:500px;">
+        <h3 style="margin-top:0; color:#17a2b8;">🧪 Simulador de Regra</h3>
+        <p class="small text-muted">Testa a regra atual do formulário (mesmo não salva) contra uma transação fictícia.</p>
+        
+        <div class="form grid">
+            <label>Descrição do Extrato:
+                <input type="text" id="simDesc" placeholder="ex: UBER TRIP SP" />
+            </label>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
+                <label>Valor (BRL absoluto):
+                    <input type="number" id="simVal" placeholder="ex: 35.50" value="10.00" />
+                </label>
+                <label>Cartão Origem:
+                    <select id="simCardId">
+                        <option value="">(Nenhum / Não Fatura)</option>
+                        ${cards.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
+                    </select>
+                </label>
+            </div>
+            <label>Conta Origem:
+                <select id="simAccId">
+                    <option value="">(Nenhum / Débito/Pix)</option>
+                    ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
+                </select>
+            </label>
+            
+            <button type="button" id="btnRunTestRule" style="background:#007bff; color:white; margin-top:10px;">Executar Teste</button>
+        </div>
+        
+        <div id="simOutput" style="margin-top:15px; background:#f0f0f0; padding:10px; border-radius:5px; font-family:monospace; font-size:11px; white-space:pre-wrap; display:none;"></div>
+        
+        <div style="margin-top:15px; text-align:right;">
+             <button type="button" id="btnClsTestRule" style="background:#6c757d; color:white;">Fechar</button>
+        </div>
+    </dialog>
     `;
 
     // Recurrent Goals UI
@@ -248,6 +343,73 @@ export async function settingsScreen() {
     </div>
     `;
 
+    const rateSection = `
+    <div class="card" style="border-left: 4px solid #17a2b8;">
+        <div><strong style="color:#0056b3;">Câmbio & Conversão (USD → BRL)</strong></div>
+        <div class="small" style="color:#666; margin-bottom:10px;">Defina a cotação padrão e recalcule o histórico unificado em BRL.</div>
+        
+        <form id="rateForm" class="form flex" style="align-items:flex-end; gap:10px; margin-bottom:15px; display:flex;">
+            <label style="flex:1">Taxa Global do Sistema
+                <input type="number" step="0.0001" name="usdRate" placeholder="Ex: 5.50" value="${settings.usdRate || ''}" required style="width:100%"/>
+            </label>
+            <button type="submit" style="white-space:nowrap; height:32px;">Atualizar Taxa</button>
+        </form>
+
+        <div style="background:#f9f9f9; padding:10px; border-radius:4px; font-size:11px;">
+            <div style="font-weight:bold; margin-bottom:5px;">Processamento em Lote:</div>
+            <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                <button type="button" id="btnRecalcSelected" style="background:#6c757d; font-size:11px; padding:5px 10px;">Recalcular USD (Avançado)...</button>
+                <button type="button" id="recalcBtn" class="danger" style="font-size:11px; padding:5px 10px;">Forçar TODOS (Preservando fixos)</button>
+            </div>
+            <div class="small" style="margin-top:5px; color:#555;">Recalcula o campo "valueBRL" invisível em todas as despesas internacionais passadas.</div>
+        </div>
+
+        <div id="modalRecalc" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; box-shadow:0 0 100px rgba(0,0,0,0.8); z-index:999; border-radius:8px; width:95%; max-width:600px; max-height:90vh; overflow-y:auto;">
+            <h3>Auditoria de Recálculo USD</h3>
+            <div class="form" id="recalcFormArea">
+                <label>Mês Referência (YYYY-MM)
+                    <input type="month" id="recalcMonth" value="${new Date().toISOString().substring(0, 7)}" style="width:100%" />
+                </label>
+                <label style="display:flex; align-items:flex-start; gap:5px; font-size:11px; margin-top:10px; color:#444;">
+                    <input type="checkbox" id="recalcPreserveFx" checked />
+                    Ignorar registros que já possuem "Taxa de Câmbio" congelada (Recomendado).
+                </label>
+                <div style="display:flex; gap:10px; margin-top:15px; justify-content:flex-end;">
+                    <button type="button" id="btnCancelRecalc" style="background:#ccc;">Cancelar</button>
+                    <button type="button" id="btnPreviewRecalc" style="background:#17a2b8;">Gerar Preview</button>
+                </div>
+            </div>
+            
+            <div id="recalcPreviewArea" style="display:none; margin-top:15px; border-top:1px solid #ccc; padding-top:10px;">
+                <div id="recalcSummary" style="margin-bottom:10px; font-size:13px;"></div>
+                <div style="max-height: 250px; overflow-y:auto; border: 1px solid #ddd; background:#f9f9f9; padding:5px;">
+                    <table style="width:100%; font-size:10px; border-collapse:collapse; text-align:left;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #ccc;">
+                                <th>Data</th>
+                                <th>Desc</th>
+                                <th>USD</th>
+                                <th>Tx Antiga</th>
+                                <th>BRL Antigo</th>
+                                <th>Nova Tx</th>
+                                <th>Novo BRL</th>
+                                <th>Delta (R$)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recalcTableBody"></tbody>
+                    </table>
+                </div>
+                <div id="recalcLimitWarning" class="small" style="color:orange; margin-top:5px; display:none;">Exibindo apenas os primeiros 50 itens. O cálculo total inclui todos os registros.</div>
+                
+                <div style="display:flex; gap:10px; margin-top:15px; justify-content:flex-end;">
+                    <button type="button" id="btnBackToForm" style="background:#ccc;">Voltar</button>
+                    <button type="button" id="btnConfirmRecalc" style="background:#28a745; font-weight:bold;">Aplicar Recálculo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
+
     const catSection = `
         <div class="card">
             <div style="display:flex; gap:10px;">
@@ -316,6 +478,7 @@ export async function settingsScreen() {
     .selected-row { border-left: 3px solid #007bff; font-weight:bold; }
   </style>
   ${backupUi()}
+  ${rateSection}
   ${rulesSection}
   ${goalsSection}
   ${catSection}
@@ -413,8 +576,110 @@ export async function wireSettingsHandlers(rootEl) {
   // BACKUP HANDLERS
   const btnExport = rootEl.querySelector("#btnExport");
   const btnImport = rootEl.querySelector("#btnImport");
+  const btnExportPack = rootEl.querySelector("#btnExportPack");
+  const btnImportPack = rootEl.querySelector("#btnImportPack");
   const btnReset = rootEl.querySelector("#btnReset");
   const fileInput = rootEl.querySelector("#importFile");
+  const importPackFile = rootEl.querySelector("#importPackFile");
+
+  if (btnExportPack) {
+    btnExportPack.onclick = async () => {
+      try {
+        const data = await exportDB();
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mi = String(now.getMinutes()).padStart(2, '0');
+        const filename = `FinanceApp_Pack_${yyyy}-${mm}-${dd}_${hh}${mi}.financeapp`;
+
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert("Pack gerado: " + filename + "\n\nNo iPhone: Salve em 'Arquivos > iCloud Drive > FinanceApp' para sincronizar com 1-clique depois.");
+      } catch (e) {
+        alert("Erro ao exportar pack: " + e.message);
+      }
+    };
+  }
+
+  if (btnImportPack) {
+    btnImportPack.onclick = () => importPackFile.click();
+    importPackFile.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const text = await file.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (err) {
+        alert("Não consegui ler este arquivo. Ele pode estar corrompido ou não ser do FinanceApp.");
+        importPackFile.value = "";
+        return;
+      }
+
+      if (json.meta && json.meta.appId !== "financeapp") {
+        alert("Este arquivo não é um backup válido do FinanceApp.");
+        importPackFile.value = "";
+        return;
+      }
+
+      try {
+        let countMsg = "";
+        let backupDate = "(Sem data)";
+        if (json.meta && json.meta.counts) {
+          backupDate = new Date(json.meta.createdAt).toLocaleString();
+          const c = json.meta.counts;
+          countMsg = `- Lançamentos: ${c.transactions || 0}\n` +
+            `- Contas: ${c.accounts || 0}\n` +
+            `- Metas: ${(c.goal_templates || 0) + (c.goals || 0)}\n` +
+            `- Regras: ${c.rules || 0}\n`;
+        } else {
+          // Fallback for legacy
+          let d = json.data || json;
+          countMsg = `- Lançamentos: ${d.transactions?.length || 0}\n` +
+            `- Contas: ${d.accounts?.length || 0}\n`;
+        }
+
+        const msg = `⚡ Import Rápido iCloud\n\nDeseja substituir todos os seus dados PELO BACKUP ABAIXO?\n\nData do Pack: ${backupDate}\n${countMsg}\nEsta ação não pode ser desfeita.`;
+
+        if (!confirm(msg)) {
+          importPackFile.value = "";
+          return;
+        }
+
+        btnImportPack.disabled = true;
+        btnImportPack.innerText = "⏳ Restaurando...";
+
+        try {
+          await importDB(json, true);
+          alert("⚡ Pack restaurado com sucesso!\nO app será recarregado.");
+          location.hash = "#home";
+          location.reload();
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          btnImportPack.disabled = false;
+          btnImportPack.innerText = "⚡ Import rápido";
+          importPackFile.value = "";
+        }
+      } catch (err) {
+        alert(`Erro na leitura do Pack:\n${err.message}`);
+        importPackFile.value = "";
+      }
+    };
+  }
 
   if (btnExport) {
     btnExport.onclick = async () => {
@@ -559,23 +824,156 @@ export async function wireSettingsHandlers(rootEl) {
     if (!usdRate) return;
     await put("settings", { id: "config", usdRate });
     await refreshSettings(rootEl);
+    alert("Taxa Global de Câmbio atualizada com sucesso!");
   });
 
-  rootEl.querySelector("#recalcBtn")?.addEventListener("click", async () => {
-    const settings = await get("settings", "config");
-    if (!settings?.usdRate) return alert("Defina o câmbio primeiro.");
+  const btnRecalcSel = rootEl.querySelector("#btnRecalcSelected");
+  const modalRecalc = rootEl.querySelector("#modalRecalc");
+  if (btnRecalcSel && modalRecalc) {
+    const btnCancel = rootEl.querySelector("#btnCancelRecalc");
+    const btnPreview = rootEl.querySelector("#btnPreviewRecalc");
+    const btnBack = rootEl.querySelector("#btnBackToForm");
+    const btnConfirm = rootEl.querySelector("#btnConfirmRecalc");
 
-    const txs = await list("transactions");
-    let count = 0;
-    for (const t of txs) {
-      if (t.currency === "USD") {
-        t.valueBRL = t.value * settings.usdRate;
+    const formArea = rootEl.querySelector("#recalcFormArea");
+    const previewArea = rootEl.querySelector("#recalcPreviewArea");
+    const tbody = rootEl.querySelector("#recalcTableBody");
+    const summary = rootEl.querySelector("#recalcSummary");
+    const limitWarning = rootEl.querySelector("#recalcLimitWarning");
+
+    let pendingTxsToUpdate = [];
+    let pendingRate = 0;
+
+    const resetModal = () => {
+      formArea.style.display = "block";
+      previewArea.style.display = "none";
+      pendingTxsToUpdate = [];
+      pendingRate = 0;
+    };
+
+    btnRecalcSel.onclick = () => {
+      resetModal();
+      modalRecalc.style.display = "block";
+    };
+
+    btnCancel.onclick = () => modalRecalc.style.display = "none";
+    btnBack.onclick = resetModal;
+
+    btnPreview.onclick = async () => {
+      const m = rootEl.querySelector("#recalcMonth").value;
+      const preserve = rootEl.querySelector("#recalcPreserveFx").checked;
+      if (!m) return alert("Selecione um mês válido.");
+
+      const cfg = await get("settings", "config");
+      if (!cfg?.usdRate) return alert("Defina uma taxa global de câmbio antes de recalcular.");
+      pendingRate = cfg.usdRate;
+
+      const txs = await list("transactions");
+      let totalDelta = 0;
+      pendingTxsToUpdate = [];
+
+      for (const t of txs) {
+        if (t.currency === "USD" && t.date.startsWith(m)) {
+          if (preserve && t.fxRate > 0) continue; // Pula congelados
+
+          const valBRLAntigo = t.valueBRL || (t.value * (t.fxRate || 0));
+          const valBRLNovo = t.value * pendingRate;
+          const delta = valBRLNovo - valBRLAntigo;
+
+          pendingTxsToUpdate.push({
+            tx: t,
+            oldRate: t.fxRate || "(Auto)",
+            oldBRL: valBRLAntigo,
+            newBRL: valBRLNovo,
+            delta: delta
+          });
+          totalDelta += delta;
+        }
+      }
+
+      if (pendingTxsToUpdate.length === 0) {
+        return alert("Nenhum lançamento elegível para recálculo neste mês/critério.");
+      }
+
+      // Render Table
+      tbody.innerHTML = "";
+      const displayLimit = 50;
+      limitWarning.style.display = pendingTxsToUpdate.length > displayLimit ? "block" : "none";
+
+      pendingTxsToUpdate.slice(0, displayLimit).forEach(item => {
+        const t = item.tx;
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid #eee";
+
+        const deltaColor = item.delta > 0 ? "red" : (item.delta < 0 ? "green" : "#666");
+
+        tr.innerHTML = `
+            <td>${t.date.split("-").reverse().join("/")}</td>
+            <td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px;">${esc(t.description)}</td>
+            <td>U$ ${t.value.toFixed(2)}</td>
+            <td>${item.oldRate}</td>
+            <td>R$ ${item.oldBRL.toFixed(2)}</td>
+            <td style="color:#007bff; font-weight:bold;">${pendingRate}</td>
+            <td style="color:#007bff; font-weight:bold;">R$ ${item.newBRL.toFixed(2)}</td>
+            <td style="color:${deltaColor}; font-weight:bold;">${item.delta > 0 ? '+' : ''}${item.delta.toFixed(2)}</td>
+          `;
+        tbody.appendChild(tr);
+      });
+
+      const totalDColor = totalDelta > 0 ? "red" : "green";
+      summary.innerHTML = `
+        <strong>Afetados:</strong> ${pendingTxsToUpdate.length} lançamentos.<br/>
+        <strong>Impacto Global Estimado:</strong> <span style="color:${totalDColor}; font-weight:bold;">${totalDelta > 0 ? '+' : ''} R$ ${totalDelta.toFixed(2)}</span>
+      `;
+
+      formArea.style.display = "none";
+      previewArea.style.display = "block";
+    };
+
+    btnConfirm.onclick = async () => {
+      let count = 0;
+      const preserve = rootEl.querySelector("#recalcPreserveFx").checked;
+
+      for (const item of pendingTxsToUpdate) {
+        const t = item.tx;
+        t.valueBRL = item.newBRL;
+        if (!preserve) {
+          // If user forced bypass of preserveFx, we clear their explicit fxRate so it's fully tracked by global again, or explicitly overwrite it.
+          // Better standard: if we are applying global rate over them, we can strip the 'fixed' status or just set it.
+          // M.D. standard: batch recalculator unfixes them.
+          t.fxRate = null;
+        }
         await put("transactions", t);
         count++;
       }
-    }
-    alert(`${count} lançamentos recalculados.`);
-  });
+
+      alert(`Sucesso! ${count} lançamentos foram salvos no banco.`);
+      modalRecalc.style.display = "none";
+      await refreshSettings(rootEl);
+    };
+  }
+
+  // Rewrite recalcBtn (TODOS)
+  const recalcAllBtn = rootEl.querySelector("#recalcBtn");
+  if (recalcAllBtn) {
+    recalcAllBtn.onclick = async () => {
+      if (!confirm("Isso aplicará a taxa global de USD ATUAL em TODOS os lançamentos USD passados que não possuem taxa fixa congelada. Continuar?")) return;
+      const cfg = await get("settings", "config");
+      if (!cfg?.usdRate) return alert("Defina o câmbio primeiro.");
+
+      const txs = await list("transactions");
+      let count = 0;
+      for (const t of txs) {
+        if (t.currency === "USD") {
+          if (t.fxRate > 0) continue; // SEMPRE preserva taxa fixada individualmente no "ALL"
+          t.valueBRL = t.value * cfg.usdRate;
+          await put("transactions", t);
+          count++;
+        }
+      }
+      alert(`${count} lançamentos brutos globais recalculados usando taxa de R$ ${cfg.usdRate}.`);
+    };
+  }
 
   // Categories
   rootEl.querySelector("#catForm")?.addEventListener("submit", async (e) => {
@@ -711,7 +1109,16 @@ export async function wireSettingsHandlers(rootEl) {
         enabled: fd.get("enabled") === "on",
         priority: parseInt(fd.get("priority")) || 10,
         match: {
-          descriptionIncludes: fd.get("matchIncludes")
+          // Phase 16A-2 Extended Filters
+          anyIncludes: fd.get("ruleAnyIncludes") ? fd.get("ruleAnyIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+          allIncludes: fd.get("ruleAllIncludes") ? fd.get("ruleAllIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+          noneIncludes: fd.get("ruleNoneIncludes") ? fd.get("ruleNoneIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+
+          cardId: fd.get("ruleCardId") || undefined,
+          accountId: fd.get("ruleAccountId") || undefined,
+
+          minAmountBRL: fd.get("ruleMinAmount") ? parseFloat(fd.get("ruleMinAmount")) : undefined,
+          maxAmountBRL: fd.get("ruleMaxAmount") ? parseFloat(fd.get("ruleMaxAmount")) : undefined
         },
         actions: {},
         options: {
@@ -752,7 +1159,16 @@ export async function wireSettingsHandlers(rootEl) {
         f.querySelector("[name=name]").value = rule.name;
         f.querySelector("[name=priority]").value = rule.priority || 10;
         f.querySelector("[name=enabled]").checked = rule.enabled !== false;
-        f.querySelector("[name=matchIncludes]").value = rule.match?.descriptionIncludes || "";
+
+        // Matchers
+        const m = rule.match || {};
+        f.querySelector("[name=ruleAnyIncludes]").value = (m.anyIncludes || (m.descriptionIncludes ? [m.descriptionIncludes] : [])).join(", ");
+        f.querySelector("[name=ruleAllIncludes]").value = (m.allIncludes || []).join(", ");
+        f.querySelector("[name=ruleNoneIncludes]").value = (m.noneIncludes || []).join(", ");
+        f.querySelector("[name=ruleCardId]").value = m.cardId || "";
+        f.querySelector("[name=ruleAccountId]").value = m.accountId || "";
+        f.querySelector("[name=ruleMinAmount]").value = m.minAmountBRL || "";
+        f.querySelector("[name=ruleMaxAmount]").value = m.maxAmountBRL || "";
 
         const catId = rule.actions?.categoryId || "";
         f.querySelector("[name=actionCategory]").value = catId;
@@ -769,6 +1185,7 @@ export async function wireSettingsHandlers(rootEl) {
         document.getElementById("ruleFormTitle").innerText = "Editar Regra";
         document.getElementById("btnSaveRule").innerText = "Salvar Alterações";
         document.getElementById("btnCancelEditRule").style.display = "block";
+        document.getElementById("btnTestRule").style.display = "block";
 
         // Scroll to form
         f.scrollIntoView({ behavior: "smooth" });
@@ -784,6 +1201,83 @@ export async function wireSettingsHandlers(rootEl) {
         document.getElementById("ruleFormTitle").innerText = "Nova Regra";
         document.getElementById("btnSaveRule").innerText = "Salvar Regra";
         btnCancel.style.display = "none";
+        document.getElementById("btnTestRule").style.display = "none";
+      };
+    }
+
+    // --- Phase 16A-2 Rule Simulator ---
+    const btnTest = rootEl.querySelector("#btnTestRule");
+    const testModal = rootEl.querySelector("#modalTestRule");
+    if (btnTest && testModal) {
+      btnTest.onclick = () => {
+        // Pre-fill inputs from form state just for fun, or leave blank initially
+        testModal.showModal();
+      };
+
+      rootEl.querySelector("#btnClsTestRule").onclick = () => {
+        testModal.close();
+        rootEl.querySelector("#simOutput").style.display = "none";
+      };
+
+      rootEl.querySelector("#btnRunTestRule").onclick = async () => {
+        const out = rootEl.querySelector("#simOutput");
+        out.style.display = "block";
+        out.innerHTML = "<em>Simulando...</em>";
+
+        // 1. Build Mock Tx
+        const mockTx = {
+          id: "sim_tx_001",
+          description: rootEl.querySelector("#simDesc").value || "",
+          value: parseFloat(rootEl.querySelector("#simVal").value) || 0,
+          valueBRL: parseFloat(rootEl.querySelector("#simVal").value) || 0,
+          cardId: rootEl.querySelector("#simCardId").value || undefined,
+          accountId: rootEl.querySelector("#simAccId").value || undefined,
+          categoryId: "",
+          tags: []
+        };
+
+        // 2. Build Mock Rule directly from the ongoing Form (no need to save)
+        const fd = new FormData(rForm);
+        const mockRule = {
+          id: "mock_rule",
+          match: {
+            anyIncludes: fd.get("ruleAnyIncludes") ? fd.get("ruleAnyIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+            allIncludes: fd.get("ruleAllIncludes") ? fd.get("ruleAllIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+            noneIncludes: fd.get("ruleNoneIncludes") ? fd.get("ruleNoneIncludes").split(",").map(s => s.trim()).filter(Boolean) : [],
+            cardId: fd.get("ruleCardId") || undefined,
+            accountId: fd.get("ruleAccountId") || undefined,
+            minAmountBRL: fd.get("ruleMinAmount") ? parseFloat(fd.get("ruleMinAmount")) : undefined,
+            maxAmountBRL: fd.get("ruleMaxAmount") ? parseFloat(fd.get("ruleMaxAmount")) : undefined
+          },
+          actions: {
+            categoryId: fd.get("actionCategory"),
+            subcategoryId: fd.get("actionSubcategory"),
+            personId: fd.get("actionPerson"),
+            tags: fd.get("actionTags") ? fd.get("actionTags").split(",").map(s => s.trim()).filter(Boolean) : []
+          }
+        };
+
+        // 3. Import dynamic engine properly to avoid polluting context
+        const mRules = await import('./rules_engine.js');
+        const subcats = await list("subcategories");
+
+        // 4. Execute
+        const result = mRules.applyRulesToDraft(mockTx, [mockRule], subcats);
+
+        // 5. Present Results
+        const didMatch = result.appliedRuleIds.includes("mock_rule");
+
+        if (didMatch) {
+          out.innerHTML = `<span style="color:green; font-weight:bold;">✅ Regra Aplicada com Sucesso!</span>\n\nA transação mock passou nas validações da Regra.`;
+          out.innerHTML += `\n\n📌 <b>Alterações Projetadas:</b>\n`;
+          if (result.draftTx.categoryId) out.innerHTML += `- Categoria ID: ${result.draftTx.categoryId}\n`;
+          if (result.draftTx.subcategoryId) out.innerHTML += `- Subcat ID: ${result.draftTx.subcategoryId}\n`;
+          if (result.draftTx.personId) out.innerHTML += `- Pessoa ID: ${result.draftTx.personId}\n`;
+          if (result.draftTx.tags && result.draftTx.tags.length) out.innerHTML += `- Tags: [${result.draftTx.tags.join(', ')}]\n`;
+        } else {
+          out.innerHTML = `<span style="color:red; font-weight:bold;">❌ Regra Falhou (Não Bateu)</span>\n\nA transação simulada não atinge os critérios construídos pelo formulário.`;
+          out.innerHTML += `\n\n🔍 Dicas de debugging:\n- Verificou Músculas/Minúsculas?\n- O filtro de Conta/Cartão condiz?\n- Alguma palavra caiu no 'Não Pode'?\n- O valor bate com a faixa delimitada?`;
+        }
       };
     }
   }

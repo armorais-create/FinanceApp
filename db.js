@@ -1,6 +1,6 @@
 // db.js — banco local no navegador (IndexedDB)
 const DB_NAME = "financeapp";
-const DB_VERSION = 19; // INCREMENTED for Bills Feature
+const DB_VERSION = 24; // INCREMENTED for Phase 17A-2 (Checklist do Mês)
 const SUPPORTED_BACKUP_VERSION = 1;
 
 // Helper to validate legacy dumps
@@ -34,7 +34,14 @@ const STORES = [
     "goal_revisions",
     "goal_overrides",
     "bill_templates",
-    "bills"
+    "bill_plans",
+    "bills",
+    "loans",
+    "loan_payments",
+    "loan_installments",
+    "person_balances",
+    "balance_events",
+    "month_checklist"
 ];
 
 function openDB() {
@@ -131,10 +138,20 @@ function openDB() {
                 s.createIndex("by_month", "month", { unique: false });
             }
 
+            if (!db.objectStoreNames.contains("month_checklist")) {
+                console.log("[DB Upgrade] Creating store: month_checklist");
+                db.createObjectStore("month_checklist", { keyPath: "id" });
+            }
+
             // Bills Feature
             if (!db.objectStoreNames.contains("bill_templates")) {
                 console.log("[DB Upgrade] Creating store: bill_templates");
                 db.createObjectStore("bill_templates", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("bill_plans")) {
+                console.log("[DB Upgrade] Creating store: bill_plans");
+                db.createObjectStore("bill_plans", { keyPath: "id" });
             }
 
             if (!db.objectStoreNames.contains("bills")) {
@@ -142,6 +159,47 @@ function openDB() {
                 const s = db.createObjectStore("bills", { keyPath: "id" });
                 s.createIndex("by_month", "month", { unique: false });
                 s.createIndex("by_template", "templateId", { unique: false });
+                s.createIndex("by_plan", "planId", { unique: false });
+            } else {
+                const s = tx.objectStore("bills");
+                if (!s.indexNames.contains("by_plan")) {
+                    console.log("[DB Upgrade] Creating index: by_plan on bills");
+                    s.createIndex("by_plan", "planId", { unique: false });
+                }
+            }
+
+            // Loans Feature (14A)
+            if (!db.objectStoreNames.contains("loans")) {
+                console.log("[DB Upgrade] Creating store: loans");
+                const s = db.createObjectStore("loans", { keyPath: "id" });
+                s.createIndex("by_status", "status", { unique: false });
+                s.createIndex("by_borrower", "borrowerPersonId", { unique: false });
+                s.createIndex("by_lender", "lenderPersonId", { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains("loan_payments")) {
+                console.log("[DB Upgrade] Creating store: loan_payments");
+                const s = db.createObjectStore("loan_payments", { keyPath: "id" });
+                s.createIndex("by_loanId", "loanId", { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains("loan_installments")) {
+                console.log("[DB Upgrade] Creating store: loan_installments");
+                const s = db.createObjectStore("loan_installments", { keyPath: "id" });
+                s.createIndex("by_loanId", "loanId", { unique: false });
+                s.createIndex("by_status", "status", { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains("person_balances")) {
+                console.log("[DB Upgrade] Creating store: person_balances");
+                db.createObjectStore("person_balances", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("balance_events")) {
+                console.log("[DB Upgrade] Creating store: balance_events");
+                const s = db.createObjectStore("balance_events", { keyPath: "id" });
+                s.createIndex("by_person", "personId", { unique: false });
+                s.createIndex("by_month", "month", { unique: false });
             }
         };
 
@@ -295,8 +353,10 @@ export async function exportDB() {
     });
 
     const results = await Promise.all(promises);
+    backup.meta.counts = {};
     results.forEach(r => {
         backup.data[r.name] = r.items;
+        backup.meta.counts[r.name] = r.items.length;
     });
 
     return backup;
