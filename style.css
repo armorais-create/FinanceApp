@@ -145,3 +145,50 @@ button.secondary {
     background: #6c757d;
     border-color: #6c757d;
 }
+/* REJANE REPORT PRINT STYLES */
+@media print {
+    body {
+        background: #fff;
+        color: #000;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* Esconder UI */
+    .topbar, 
+    .tabs, 
+    .no-print,
+    #diagnostic-panel,
+    [data-action="nav"] {
+        display: none !important;
+    }
+
+    .view {
+        padding: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+    /* Formatando Relatório */
+    .report-page {
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        width: 100% !important;
+    }
+
+    .print-container {
+        width: 100%;
+    }
+
+    .report-table th,
+    .report-table td {
+        border: 1px solid #ccc !important;
+        padding: 6px !important;
+    }
+
+    /* Print page breaks cleanly */
+    .report-page {
+        page-break-inside: avoid;
+    }
+}

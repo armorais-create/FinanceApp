@@ -292,6 +292,158 @@ const Adapters = {
             if (err.name === 'PasswordException') throw new Error("PASSWORD_REQUIRED");
             throw err;
         }
+    },
+
+    ofx: async (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = e.target.result;
+                    const rows = [];
+                    let defaultCurrency = "BRL";
+
+                    // Extract default currency if present
+                    const curMatch = content.match(/<CURDEF>([A-Z]{3})/i);
+                    if (curMatch) defaultCurrency = curMatch[1].toUpperCase();
+
+                    // Split into transactions
+                    const stmts = content.split(/<STMTTRN>/i);
+
+                    // The first split chunk is header info before the first <STMTTRN>
+                    for (let i = 1; i < stmts.length; i++) {
+                        const block = stmts[i];
+
+                        // Stop reading this block at </STMTTRN> if it's there
+                        const txnData = block.split(/<\/STMTTRN>/i)[0];
+
+                        // Extract fields
+                        const dtMatch = txnData.match(/<DTPOSTED>([^<]+)/i);
+                        const trnMatch = txnData.match(/<TRNAMT>([^<]+)/i);
+                        const fitMatch = txnData.match(/<FITID>([^<]+)/i);
+                        const nameMatch = txnData.match(/<NAME>([^<]+)/i);
+                        const memoMatch = txnData.match(/<MEMO>([^<]+)/i);
+
+                        if (dtMatch && trnMatch) {
+                            let rawDate = dtMatch[1].trim();
+                            // OFX date is usually YYYYMMDD or YYYYMMDDHHMMSS
+                            let dateISO = null;
+                            if (rawDate.length >= 8) {
+                                dateISO = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
+                            }
+
+                            const rawAmount = parseFloat(trnMatch[1].trim());
+                            const fitid = fitMatch ? fitMatch[1].trim() : `ofx-${Date.now()}-${Math.random()}`;
+
+                            // Prefer MEMO if available, then NAME
+                            const memo = memoMatch ? memoMatch[1].trim() : "";
+                            const name = nameMatch ? nameMatch[1].trim() : "";
+                            const desc = memo || name || "Extrato OFX";
+
+                            if (dateISO && !isNaN(rawAmount)) {
+                                rows.push({
+                                    id: `ofx-${i}-${Date.now()}`,
+                                    dateISO,
+                                    description: desc,
+                                    amount: rawAmount, // Keep sign!
+                                    currency: defaultCurrency,
+                                    fitid: fitid,
+                                    categoryId: "",
+                                    subcategoryId: "",
+                                    selected: true,
+                                    warnings: [],
+                                    raw: txnData
+                                });
+                            }
+                        }
+                    }
+
+                    resolve(rows);
+                } catch (err) {
+                    reject(new Error("Erro OFX: " + err.message));
+                }
+            };
+            reader.readAsText(file); // Assume standard or ISO-8859 parsing works, wait usually ISO-8859-1 for OFX but let's see. You can try Windows-1252 or utf-8.
+        });
+    },
+
+    qif: async (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = e.target.result;
+                    const lines = content.split('\n');
+                    const rows = [];
+
+                    let currentDate = null;
+                    let currentAmount = 0;
+                    let currentPayee = "";
+                    let currentMemo = "";
+                    let isParsingTx = false;
+
+                    lines.forEach((line, index) => {
+                        const str = line.trim();
+                        if (!str) return;
+
+                        if (str.startsWith('^')) {
+                            // End of transaction block
+                            if (isParsingTx && currentDate) {
+                                const desc = currentMemo || currentPayee || "Extrato QIF";
+                                // Hash if no FITID
+                                const pseudoHash = `qif-${currentDate}-${currentAmount}-${desc}`.replace(/\s+/g, '-');
+
+                                rows.push({
+                                    id: `qif-${index}-${Date.now()}`,
+                                    dateISO: currentDate,
+                                    description: desc,
+                                    amount: currentAmount,
+                                    currency: "BRL", // QIF rarely has currency inline reliably
+                                    fitid: pseudoHash,
+                                    categoryId: "",
+                                    subcategoryId: "",
+                                    selected: true,
+                                    warnings: [],
+                                    raw: str
+                                });
+                            }
+                            // reset
+                            currentDate = null;
+                            currentAmount = 0;
+                            currentPayee = "";
+                            currentMemo = "";
+                            isParsingTx = false;
+                        } else {
+                            // First character is the type
+                            const type = str[0];
+                            const val = str.substring(1).trim();
+
+                            if (type === 'D') {
+                                // Date can be MM/DD/YYYY or DD/MM/YYYY or MM/DD'YY
+                                // QIF dates are notorious. Let's try normalizeDate.
+                                currentDate = normalizeDate(val);
+                                isParsingTx = true;
+                            } else if (type === 'T' || type === 'U') {
+                                currentAmount = parseFloat(val.replace(',', '')); // Assume dot decimal in QIF
+                                if (isNaN(currentAmount)) currentAmount = 0;
+                                isParsingTx = true;
+                            } else if (type === 'P') {
+                                currentPayee = val;
+                                isParsingTx = true;
+                            } else if (type === 'M') {
+                                currentMemo = val;
+                                isParsingTx = true;
+                            }
+                        }
+                    });
+
+                    resolve(rows);
+                } catch (err) {
+                    reject(new Error("Erro QIF: " + err.message));
+                }
+            };
+            reader.readAsText(file); // Or ISO-8859-1 depending on charset
+        });
     }
 };
 
@@ -307,23 +459,37 @@ export const importer = {
         if (ext === "csv") rows = await Adapters.csv(file);
         else if (ext === "xlsx" || ext === "xls") rows = await Adapters.xlsx(file);
         else if (ext === "pdf") rows = await Adapters.pdf(file, password);
+        else if (ext === "ofx") rows = await Adapters.ofx(file);
+        else if (ext === "qif") rows = await Adapters.qif(file);
         else throw new Error("Formato não suportado: " + ext);
 
         // Deduplication Check
         const existingTxs = await list("transactions");
-        // Create lookup Map for performance: "date|amount" -> [descriptions...]
+        // Create lookup Map for performance: "date|amount" -> [descriptions...] and "fitid" -> true
         const lookup = new Map();
+        const fitidLookup = new Set();
+
         existingTxs.forEach(tx => {
-            const key = `${tx.date}|${tx.value}`; // Note: existingTxs might still use 'date' and 'value'
+            const key = `${tx.date}|${tx.value}`;
             if (!lookup.has(key)) lookup.set(key, []);
             lookup.get(key).push(tx.description.toLowerCase());
+
+            if (tx.importId) {
+                fitidLookup.add(tx.importId);
+            }
         });
 
         rows.forEach(row => {
-            const key = `${row.dateISO}|${row.amount}`; // Use new fields for comparison
-            if (lookup.has(key)) {
-                // const candidates = lookup.get(key); // Not used in this simplified check
-                row.warnings.push("Possível duplicata (valor e data coincidem)");
+            // Check deterministic FITID (OFX/QIF)
+            if (row.fitid && fitidLookup.has(row.fitid)) {
+                row.warnings.push("Duplicada exata: (ID do Extrato já importado)");
+                // We don't automatically deselect here so the user can see it, but we could!
+            } else {
+                // Fallback heuristic deduplication for CSV/PDF
+                const key = `${row.dateISO}|${row.amount}`;
+                if (lookup.has(key)) {
+                    row.warnings.push("Possível duplicata (valor e data coincidem)");
+                }
             }
         });
 

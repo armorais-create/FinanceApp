@@ -1,4 +1,5 @@
 import { list, put, remove, uid, get, deleteTransaction } from "../db.js";
+import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -17,6 +18,8 @@ let _filters = {
     sort: 'manual_asc', // manual_asc, due_asc, paid_desc, amount_desc
     showSkipped: false // NEW
 };
+
+let _searchState = { ...defaultSearchState };
 
 // State for UI
 let _state = {
@@ -41,17 +44,25 @@ const SORT_OPTIONS = {
 
 export async function billsScreen() {
     try {
-        // Feature: Intercept ?next router flag from Home to fast-forward 1 month
-        if (location.hash.includes("bills?next")) {
-            const d = new Date();
-            d.setMonth(d.getMonth() + 1);
-            currentMonth = d.toISOString().slice(0, 7);
-        } else if (location.hash.includes("bills") && !location.hash.includes("?next")) {
-            // Restore actual month if coming locally without next
+        // Feature: Intercept router flags
+        const hashParts = location.hash.split("?");
+        if (hashParts[1]) {
+            const params = new URLSearchParams(hashParts[1]);
+            if (params.has("next")) {
+                const d = new Date();
+                d.setMonth(d.getMonth() + 1);
+                currentMonth = d.toISOString().slice(0, 7);
+            } else if (params.get("month")) {
+                currentMonth = params.get("month");
+            } else {
+                currentMonth = new Date().toISOString().slice(0, 7);
+            }
+        } else if (location.hash.includes("bills")) {
             currentMonth = new Date().toISOString().slice(0, 7);
         }
+
         // Safe loading (Hardening D1)
-        const [templates, plans, categories, subcategories, people, accounts, cards, allBills, settingsList] = await Promise.all([
+        const [templates, plans, categories, subcategories, people, accounts, cards, allBills, settingsList, tags] = await Promise.all([
             list("bill_templates").catch(e => []),
             list("bill_plans").catch(e => []),
             list("categories").catch(e => []),
@@ -60,7 +71,8 @@ export async function billsScreen() {
             list("accounts").catch(e => []),
             list("cards").catch(e => []),
             list("bills").catch(e => []),
-            list("settings").catch(e => [])
+            list("settings").catch(e => []),
+            list("tags").catch(e => [])
         ]);
 
         // Restore filters if available
@@ -199,6 +211,16 @@ export async function billsScreen() {
         const getPersonName = (id) => people.find(p => p.id === id)?.name || "";
         const formatDate = (iso) => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "--/--";
 
+        // Filter text, tag and category early using search logic
+        let searchResults = filtered;
+
+        // Custom wrapper for applyGlobalSearch because bills person is handled by both, but we will let applyGlobalSearch handle text/tag/category
+        searchResults = applyGlobalSearch(searchResults, _searchState, categories, people);
+
+        // Paginate results
+        const totalFiltered = searchResults.length;
+        const paginatedBills = searchResults.slice(0, _searchState.limit);
+
         // --- RENDER HELPERS ---
         const renderSummary = () => {
             const currencies = Object.keys(totals).filter(k => k.length === 3 && (totals[k].expected > 0));
@@ -248,15 +270,15 @@ export async function billsScreen() {
                      <button class="small ${_filters.status === 'open' ? 'primary' : 'secondary'}" data-filter="status" data-val="open">Abertos</button>
                      <button class="small ${_filters.status === 'paid' ? 'primary' : 'secondary'}" data-filter="status" data-val="paid">Pagos</button>
                  </div>
-                 <div style="width:1px; background:#ccc; height:20px; margin:0 5px;"></div>
+                     <div style="width:1px; background:#ccc; height:20px; margin:0 5px;"></div>
                  <select id="filterMethod" style="padding:2px; font-size:0.9em; border-radius:4px;">
                      <option value="all" ${_filters.method === 'all' ? 'selected' : ''}>Todas Vias</option>
                      <option value="account" ${_filters.method === 'account' ? 'selected' : ''}>Via Conta</option>
                      <option value="card" ${_filters.method === 'card' ? 'selected' : ''}>Via Cartão</option>
                  </select>
-                 <select id="filterPerson" style="padding:2px; font-size:0.9em; border-radius:4px;">
+                 <select id="filterPerson" style="padding:2px; font-size:0.9em; border-radius:4px; display: none;">
+                     <!-- Oculto para evitar duplicar com o global search -->
                      <option value="">Todas Pessoas</option>
-                     ${people.map(p => `<option value="${p.id}" ${_filters.personId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                  </select>
                  <select id="filterSort" style="padding:2px; font-size:0.9em; border-radius:4px;">
                      ${Object.entries(SORT_OPTIONS).map(([k, v]) => `<option value="${k}" ${_filters.sort === k ? 'selected' : ''}>${v}</option>`).join('')}
@@ -598,13 +620,17 @@ export async function billsScreen() {
             <!-- FILTERS -->
             ${renderFilters()}
 
+            <div id="billSearchContainer" style="margin-top: 5px;">
+                ${renderGlobalSearch(_searchState, categories, tags, people)}
+            </div>
+
             <hr style="margin: 10px 0; border:0; border-top:1px solid #eee;">
 
-            <strong>Contas de ${currentMonth} (${filtered.length})</strong>
+            <strong>Contas de ${currentMonth} (${totalFiltered})</strong>
             <div style="margin-top:10px;">
-                ${filtered.length === 0 ? '<div class="small text-muted" style="text-align:center; padding:20px;">Nenhuma conta encontrada nos filtros.</div>' : ''}
-                <ul class="list">
-                    ${filtered.map(b => {
+                ${paginatedBills.length === 0 ? '<div class="small text-muted" style="text-align:center; padding:20px;">Nenhuma conta encontrada nos filtros.</div>' : ''}
+                <ul class="list" id="billsListContainer">
+                    ${paginatedBills.map(b => {
                         const isPaid = b.status === "paid";
                         const isPartial = b.status === "partial";
                         const isSkipped = b.status === "skipped";
@@ -672,7 +698,7 @@ export async function billsScreen() {
                                 </div>
                              </div>
 
-                             <div style="display:flex; gap:5px; align-items:center; margin-left:10px;">
+                            <div style="display:flex; gap:5px; align-items:center; margin-left:10px;">
                                 ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="secondary small" data-action="move-bill-up" data-id="${b.id}" style="padding:4px 8px;" title="Subir">↑</button>` : ''}
                                 ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="secondary small" data-action="move-bill-down" data-id="${b.id}" style="padding:4px 8px;" title="Descer">↓</button>` : ''}
                                 ${!isPaid && !isSkipped ? `<button class="${b.pinned ? 'primary' : 'secondary'} small" data-action="toggle-bill-pin" data-id="${b.id}" style="padding:4px 8px;" title="${b.pinned ? 'Desfixar' : 'Fixar no topo'}">📌</button>` : ''}
@@ -691,6 +717,10 @@ export async function billsScreen() {
                         </li>
                     `}).join('')}
                 </ul>
+                ${totalFiltered > _searchState.limit ? `<div style="text-align:center; padding: 15px;">
+                    <button id="btnLoadMoreBills" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                    <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
+                 </div>` : ''}
             </div>
         </div>
 
@@ -1148,13 +1178,21 @@ function renderPlanForm(plan, categories, subcategories, people, accounts, cards
                 </form>`;
 }
 
-export async function wireBillsHandlers(rootEl) {
+export function wireBillsHandlers(rootEl) {
+    const dFunc = (selector, event, callback) => {
+        rootEl.querySelectorAll(selector).forEach(el => el.addEventListener(event, callback));
+    };
+
+    // Initialize Global Search
+    wireGlobalSearch(rootEl, _searchState, () => {
+        const ev = new Event("hashchange");
+        window.dispatchEvent(ev);
+    });
+
     const refresh = async () => {
         const ev = new Event("hashchange");
         window.dispatchEvent(ev);
     };
-
-    // --- NEW: FILTER HANDLERS ---
 
     // Helper to save filters
     const saveFilters = async () => {
@@ -1383,6 +1421,14 @@ export async function wireBillsHandlers(rootEl) {
 
     // Edit/Toggle/Action Buttons (Delegation)
     rootEl.addEventListener("click", async (e) => {
+        const btnLoadMore = e.target.closest("#btnLoadMoreBills");
+        if (btnLoadMore) {
+            _searchState.limit += 50;
+            const ev = new Event("hashchange");
+            window.dispatchEvent(ev);
+            return;
+        }
+
         const btnTabMonth = e.target.closest("#tabMonth");
         const btnTabTemplates = e.target.closest("#tabTemplates");
         const btnToggleTemplatesTab = e.target.closest("#btnToggleTemplates");
@@ -2506,6 +2552,24 @@ export async function wireBillsHandlers(rootEl) {
             refresh();
         });
     });
+
+    // Deep Link Highlight
+    setTimeout(() => {
+        const hashParts = location.hash.split("?");
+        if (hashParts[1]) {
+            const params = new URLSearchParams(hashParts[1]);
+            const highlightId = params.get("highlight");
+            if (highlightId) {
+                const el = rootEl.querySelector(`[data-id="${highlightId}"]`)?.closest('li') || rootEl.querySelector(`[data-id="${highlightId}"]`)?.closest('.card');
+                if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.style.backgroundColor = "#e2f0d9";
+                    el.style.transition = "background-color 2s";
+                    setTimeout(() => el.style.backgroundColor = "", 2000);
+                }
+            }
+        }
+    }, 100);
 }
 
 // ==========================================

@@ -7,7 +7,8 @@ import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installm
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
 import { billsScreen, wireBillsHandlers } from "./screens/bills.js?v=1.0";
 import { loansScreen, wireLoansHandlers } from "./screens/loans.js";
-
+import { rejaneReportScreen, wireRejaneReportHandlers } from "./screens/rejaneReport.js";
+import { searchScreen, wireSearchHandlers } from "./screens/search.js";
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
 const tabs = Array.from(document.querySelectorAll(".tab"));
@@ -255,7 +256,10 @@ const screens = {
 
         <div class="card">
           <div><strong>Atalhos Rápidos</strong></div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+          <div style="margin-top:10px; margin-bottom:10px;">
+            <button data-action="nav" data-hash="#search" style="width:100%; background:#e83e8c; color:white; padding:12px; font-weight:bold; font-size:1.1em;">🔍 Busca Avançada</button>
+          </div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
             <button data-action="nav" data-hash="#reports" style="background:#007bff; color:white;">📊 Painel / Relatórios</button>
             <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
             <button data-action="nav" data-hash="#import">Importar Planilha</button>
@@ -291,7 +295,9 @@ const screens = {
   installments: async () => await installmentsScreen(),
   reports: async () => await reportsScreen(),
   bills: async () => await billsScreen(),
-  loans: async () => await loansScreen()
+  loans: async () => await loansScreen(),
+  "rejane-report": async () => await rejaneReportScreen(),
+  search: async () => await searchScreen()
 };
 
 // =========================================
@@ -331,6 +337,8 @@ async function setTab(tabKeyRaw) {
     else if (tabKey === "reports") await wireReportsHandlers(viewEl);
     else if (tabKey === "bills") await wireBillsHandlers(viewEl);
     else if (tabKey === "loans") await wireLoansHandlers(viewEl);
+    else if (tabKey === "rejane-report") await wireRejaneReportHandlers(viewEl);
+    else if (tabKey === "search") await wireSearchHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
 

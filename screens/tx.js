@@ -1,4 +1,5 @@
 import { list, put, uid, remove, updateTransaction, deleteTransaction, get } from "../db.js";
+import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -10,6 +11,8 @@ function esc(s) {
 /* =========================================
    TRANSACTIONS SCREEN
    ========================================= */
+
+let _searchState = { ...defaultSearchState };
 
 export async function txScreen() {
     const people = await list("people");
@@ -119,7 +122,12 @@ export async function txScreen() {
             <div><strong>Lançamentos do Mês</strong></div>
             <input type="month" id="filterMonth" value="${new Date().toISOString().substring(0, 7)}" />
         </div>
-        <div class="small" id="txTotalDisplay">Total: ${txs.length}</div>
+        
+        <div id="txSearchContainer" style="margin-top: 10px;">
+            ${renderGlobalSearch(_searchState, categories, tags, people)}
+        </div>
+
+        <div class="small" id="txTotalDisplay" style="margin-top: 5px;">Total: ${txs.length}</div>
         <ul class="list" id="txListContainer">
             <!-- Items rendered via refreshList -->
         </ul>
@@ -556,11 +564,22 @@ export async function wireTxHandlers(rootEl) {
         filterInput.addEventListener("change", () => refreshList(rootEl));
     }
 
+    // Initialize Global Search
+    wireGlobalSearch(rootEl, _searchState, () => refreshList(rootEl));
+
     // START EDIT/DELETE LOGIC
     const listContainer = rootEl.querySelector("#txListContainer");
 
     if (listContainer) {
         listContainer.addEventListener("click", async (e) => {
+            // "Load More" handle
+            const btnLoadMore = e.target.closest("#btnLoadMoreTx");
+            if (btnLoadMore) {
+                _searchState.limit += 50;
+                refreshList(rootEl);
+                return;
+            }
+
             // Mark Pay Handler
             const btnPay = e.target.closest(".payInstBtn");
             if (btnPay) {
@@ -640,6 +659,37 @@ export async function wireTxHandlers(rootEl) {
             refreshList(rootEl);
         }
     }
+
+    // Initial render and deep link handling
+    setTimeout(() => {
+        const hashParts = location.hash.split("?");
+        if (hashParts[1]) {
+            const params = new URLSearchParams(hashParts[1]);
+            const highlightId = params.get("highlight");
+            const month = params.get("month");
+
+            const doHighlight = () => {
+                if (!highlightId) return;
+                const el = rootEl.querySelector(`[data-id="${highlightId}"]`)?.closest('li');
+                if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.style.backgroundColor = "#e2f0d9";
+                    el.style.transition = "background-color 2s";
+                    setTimeout(() => el.style.backgroundColor = "", 2000);
+                }
+            };
+
+            if (month && filterInput && filterInput.value !== month) {
+                filterInput.value = month;
+                refreshList(rootEl).then(doHighlight);
+            } else {
+                refreshList(rootEl).then(doHighlight);
+            }
+        } else {
+            // Normal initial load without deep link
+            refreshList(rootEl);
+        }
+    }, 50);
 }
 
 function openEditDialog(rootEl, tx) {
@@ -720,16 +770,34 @@ async function refreshList(rootEl) {
         txs = txs.filter(t => t.date.startsWith(selectedMonth));
     }
 
+    // Apply Global Search & Filters
+    const tags = await list("tags");
+    const searchContainer = rootEl.querySelector("#txSearchContainer");
+    if (searchContainer) {
+        searchContainer.innerHTML = renderGlobalSearch(_searchState, categories, tags, people);
+        wireGlobalSearch(rootEl, _searchState, () => refreshList(rootEl));
+    }
+
+    txs = applyGlobalSearch(txs, _searchState, categories, people);
+
+    const totalFiltered = txs.length;
+    const paginatedTxs = txs.slice(0, _searchState.limit);
+
     const ul = rootEl.querySelector("#txListContainer");
-    ul.innerHTML = txs.length ? txs.map(t => renderTxItem(t, people, accounts, cards, categories)).join("") : "Nada neste mês.";
+    let html = paginatedTxs.length ? paginatedTxs.map(t => renderTxItem(t, people, accounts, cards, categories)).join("") : "Nada encontrado.";
+
+    if (totalFiltered > _searchState.limit) {
+        html += `<div style="text-align:center; padding: 15px;">
+                    <button id="btnLoadMoreTx" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                    <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
+                 </div>`;
+    }
+
+    ul.innerHTML = html;
 
     // Update Total Display
     const totalDisplay = rootEl.querySelector("#txTotalDisplay");
     if (totalDisplay) {
-        // Calculate sum? User just asked to update list. "Atualizar o total exibido".
-        // Maybe just count? The current UI shows "Total: N".
-        totalDisplay.innerText = `Total: ${txs.length}`;
-
-        // Optional: Sum amounts if desired, but user just asked to update "total exibido" which was count.
+        totalDisplay.innerText = `Total: ${totalFiltered}`;
     }
 }

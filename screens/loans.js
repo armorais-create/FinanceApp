@@ -1,4 +1,5 @@
 import { list, put, remove, uid, get } from "../db.js";
+import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -13,6 +14,8 @@ let _filters = {
     additionalMonth: new Date().toISOString().slice(0, 7)
 };
 
+let _searchState = { ...defaultSearchState };
+
 let _state = {
     showForm: false,
     editingLoan: null,
@@ -24,6 +27,16 @@ let _state = {
 
 export async function loansScreen() {
     try {
+        const hashParts = location.hash.split("?");
+        if (hashParts[1]) {
+            const params = new URLSearchParams(hashParts[1]);
+            const detailId = params.get("detail");
+            if (detailId) {
+                _state.showDetails = true;
+                _state.detailLoanId = detailId;
+            }
+        }
+
         const [loans, loanPayments, loanInstallments, people, accounts, settingsList, cards, transactions, personBalances, balanceEvents] = await Promise.all([
             list("loans").catch(() => []),
             list("loan_payments").catch(() => []),
@@ -80,6 +93,16 @@ export async function loansScreen() {
         if (_filters.view === 'owed_to_me') filtered = filtered.filter(l => l.role === 'owed_to_me');
         if (_filters.view === 'open') filtered = filtered.filter(l => l.computedStatus === 'open');
         if (_filters.view === 'closed') filtered = filtered.filter(l => l.computedStatus === 'closed');
+
+        const tags = await list("tags").catch(() => []);
+        const categories = await list("categories").catch(() => []); // loans might not use cat, but needed for applyGlobalSearch
+
+        // Apply Global Search & Filters
+        let searchResults = applyGlobalSearch(filtered, _searchState, categories, people);
+
+        // Paginate results
+        const totalFiltered = searchResults.length;
+        const paginatedLoans = searchResults.slice(0, _searchState.limit);
 
         // Dashboard Logic (Próximos Vencimentos)
         const todayStr = new Date().toISOString().slice(0, 10);
@@ -149,6 +172,7 @@ export async function loansScreen() {
                     ${chargesHtml}
                     
                     <div style="margin-top:10px; text-align:right;">
+                        <button class="secondary small" data-action="nav" data-hash="#rejane-report?month=${_filters.additionalMonth}" style="margin-right:10px;">Gerar Relatório (PDF)</button>
                         ${isClosed ?
                     '<span class="badge" style="background:#28a745; color:white;">FECHADO</span>' :
                     `<button class="primary small" data-action="close-rejane" data-month="${_filters.additionalMonth}" data-amount="${totalChargesThisMonth}" data-person="${rejanePerson.id}">Aplicar Fechamento</button>`
@@ -234,18 +258,24 @@ export async function loansScreen() {
             ${rejaneHtml}
 
             <div class="card" style="margin-top:10px;">
-                <div style="margin-bottom:10px; display:flex; gap:5px; flex-wrap:wrap;">
-                    <button class="small ${_filters.view === 'all' ? 'primary' : 'secondary'}" data-filter="all">Todos</button>
-                    <button class="small ${_filters.view === 'open' ? 'primary' : 'secondary'}" data-filter="open">Abertos</button>
-                    <button class="small ${_filters.view === 'i_owe' ? 'primary' : 'secondary'}" data-filter="i_owe">Eu Devo</button>
-                    <button class="small ${_filters.view === 'owed_to_me' ? 'primary' : 'secondary'}" data-filter="owed_to_me">Me Devem</button>
-                    <button class="small ${_filters.view === 'closed' ? 'primary' : 'secondary'}" data-filter="closed">Quitados</button>
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
+                    <div style="font-weight:bold; color:#0056b3;">Dívidas (${totalFiltered})</div>
+                    <select id="filterView" style="padding:4px; max-width:150px;">
+                        <option value="all" ${_filters.view === 'all' ? 'selected' : ''}>Todas</option>
+                        <option value="i_owe" ${_filters.view === 'i_owe' ? 'selected' : ''}>Eu Devo</option>
+                        <option value="owed_to_me" ${_filters.view === 'owed_to_me' ? 'selected' : ''}>Me Devem</option>
+                        <option value="open" ${_filters.view === 'open' ? 'selected' : ''}>Abertas</option>
+                        <option value="closed" ${_filters.view === 'closed' ? 'selected' : ''}>Fechadas</option>
+                    </select>
+                </div>
+                
+                <div id="loanSearchContainer" style="margin-top: 5px; margin-bottom: 15px;">
+                    ${renderGlobalSearch(_searchState, categories, tags, people)}
                 </div>
 
-                <div style="margin-top:10px;">
-                    ${filtered.length === 0 ? '<div class="small text-muted">Nenhum registro encontrado.</div>' : ''}
-                    <ul class="list">
-                        ${filtered.map(l => {
+                ${paginatedLoans.length === 0 ? '<div class="small text-muted" style="text-align:center; padding: 20px;">Nenhuma dívida encontrada.</div>' : ''}
+                <ul class="list" id="loansListContainer">
+                    ${paginatedLoans.map(l => {
             const isMine = l.role === 'i_owe';
             const badgeColor = isMine ? '#dc3545' : '#28a745';
             const badgeText = isMine ? 'EU DEVO' : 'ME DEVEM';
@@ -254,30 +284,33 @@ export async function loansScreen() {
             const isClosed = l.computedStatus === 'closed';
 
             return `
-                                <li class="listItem" style="border-left:4px solid ${isClosed ? '#6c757d' : badgeColor}; opacity:${isClosed ? '0.7' : '1'};">
-                                    <div style="flex:1;">
-                                        <div style="font-weight:bold; font-size:1.05em; ${isClosed ? 'text-decoration:line-through' : ''}">${esc(l.title)}</div>
-                                        <div style="font-size:0.85em; color:#555; margin-top:2px;">
-                                            <span style="background:${badgeColor}; color:white; padding:2px 4px; border-radius:3px; font-weight:bold; font-size:0.8em;">${badgeText}</span>
-                                            <span> a ${esc(rolePerson)}</span>
-                                            <span style="margin-left:5px;">• Dia ${l.dueDay}</span>
-                                        </div>
-                                    </div>
-                                    <div style="text-align:right;">
-                                        <div style="font-weight:bold; color:${isClosed ? '#6c757d' : badgeColor}">
-                                            ${l.currency} ${l.saldo.toFixed(2)}
-                                        </div>
-                                        <div style="font-size:0.8em; color:#666;">Já Pago: ${pct}%</div>
-                                    </div>
-                                    <div style="display:flex; gap:5px; margin-left:10px;">
-                                        <button class="success small" data-action="view-details" data-id="${l.id}">Histórico / Pagar</button>
-                                        <button class="danger small" data-action="delete-loan" data-id="${l.id}">✕</button>
-                                    </div>
-                                </li>
-                            `;
-        }).join('')}
-                    </ul>
-                </div>
+                        <li class="listItem" style="border-left:4px solid ${isClosed ? '#6c757d' : badgeColor}; opacity:${isClosed ? '0.7' : '1'};">
+                            <div style="flex:1;">
+                                <div style="font-weight:bold; font-size:1.05em; ${isClosed ? 'text-decoration:line-through' : ''}">${esc(l.title)}</div>
+                                <div style="font-size:0.85em; color:#555; margin-top:2px;">
+                                    <span style="background:${badgeColor}; color:white; padding:2px 4px; border-radius:3px; font-weight:bold; font-size:0.8em;">${badgeText}</span>
+                                    <span> a ${esc(rolePerson)}</span>
+                                    <span style="margin-left:5px;">• Dia ${l.dueDay}</span>
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-weight:bold; color:${isClosed ? '#6c757d' : badgeColor}">
+                                    ${l.currency} ${l.saldo.toFixed(2)}
+                                </div>
+                                <div style="font-size:0.8em; color:#666;">Já Pago: ${pct}%</div>
+                            </div>
+                            <div style="display:flex; gap:5px; margin-top:10px;">
+                                    ${l.computedStatus === 'open' ? `<button class="success small" data-action="pay-loan" data-id="${l.id}" style="flex:1;">Pagar/Receber</button>` : ''}
+                                    <button class="primary small" data-action="detail-loan" data-id="${l.id}" style="flex:1;">Detalhes</button>
+                                </div>
+                            </div>
+                        </li>
+                    `}).join('')}
+                </ul>
+                ${totalFiltered > _searchState.limit ? `<div style="text-align:center; padding: 15px;">
+                    <button id="btnLoadMoreLoans" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                    <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
+                 </div>` : ''}
             </div>
             
             ${_state.showForm ? renderLoanForm(people) : ''}
@@ -544,14 +577,34 @@ function renderLoanDetails(loan, people, accounts) {
 // Handlers
 // ---------------------------
 export async function wireLoansHandlers(rootEl) {
-    const refresh = async () => setTab(location.hash);
+    const refresh = async () => {
+        const ev = new Event("hashchange");
+        window.dispatchEvent(ev);
+    };
+
+    // Initialize Global Search
+    wireGlobalSearch(rootEl, _searchState, refresh);
+
+    rootEl.addEventListener("click", async (e) => {
+        const btnLoadMore = e.target.closest("#btnLoadMoreLoans");
+        if (btnLoadMore) {
+            _searchState.limit += 50;
+            refresh();
+            return;
+        }
+
+        const btnNew = e.target.closest("#btnNewLoan");
+    });
 
     // Filters logic
-    const filterBtns = rootEl.querySelectorAll("[data-filter]");
-    filterBtns.forEach(b => b.addEventListener("click", () => {
-        _filters.view = b.dataset.filter;
-        refresh();
-    }));
+    const filterView = rootEl.querySelector("#filterView");
+    if (filterView) {
+        filterView.addEventListener("change", (e) => {
+            _filters.view = e.target.value;
+            _searchState.limit = 50; // Reset pagination on filter change
+            refresh();
+        });
+    }
 
     const upcomingBtns = rootEl.querySelectorAll("[data-upcoming]");
     upcomingBtns.forEach(b => b.addEventListener("click", () => {

@@ -27,19 +27,18 @@ const state = {
     file: null,
     importSessionId: null,
 
-    // Data (Rows)
-    // Each row: { id, date, description, value, category, subcategory, cardType, payer, selected, warnings[], ... }
-    rows: [],
-
     // Destination choices
     dest: {
+        importType: "card", // "card" | "account"
         cardId: "",
+        accountId: "",
         invoiceMonth: new Date().toISOString().slice(0, 7), // YYYY-MM
         cardHolder: "main" // Titular or Additional
     },
 
     // Cache for dropdowns
     cache: {
+        accounts: [],
         categories: [],
         subcategories: [], // Flattened or map? We'll load all.
         cards: [],
@@ -71,19 +70,21 @@ export async function wireImportHandlers(rootEl) {
     // Load dependencies once
     if (state.cache.categories.length === 0) {
         try {
-            const [cats, subs, cards, people, tags, txs] = await Promise.all([
+            const [cats, subs, cards, people, tags, txs, accounts] = await Promise.all([
                 list("categories"),
                 list("subcategories"),
                 list("cards"),
                 list("people"),
                 list("tags"),
-                list("transactions")
+                list("transactions"),
+                list("accounts")
             ]);
             state.cache.categories = cats;
             state.cache.subcategories = subs;
             state.cache.cards = cards;
             state.cache.people = people;
             state.cache.tags = tags;
+            state.cache.accounts = accounts;
 
             // Phase 16A-1: Generate ML Cache over recent 500 items
             const recentTxs = txs.sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 500);
@@ -157,9 +158,28 @@ function renderDispatcher(container) {
 function renderStep1(cnt) {
     cnt.innerHTML = `
         <h3>1. Selecionar Arquivo</h3>
-        <p class="small">Suporta CSV, Excel (XLSX) e PDF (Extratos bancários).</p>
         
-        <div class="form" style="margin-top:20px; border: 2px dashed #ccc; padding:20px; text-align:center;">
+        <div class="form grid" style="margin-bottom: 20px;">
+            <label>O que você vai importar?
+                <select id="selImportType">
+                    <option value="card" ${state.dest.importType === 'card' ? 'selected' : ''}>Cartão de Crédito (CSV/Excel/PDF)</option>
+                    <option value="account" ${state.dest.importType === 'account' ? 'selected' : ''}>Extrato de Conta (OFX/QIF)</option>
+                </select>
+            </label>
+        </div>
+
+        <div id="accountConfigArea" class="form grid" style="margin-bottom: 20px; display: none;">
+             <label>Conta de Destino (Obrigatório)
+                <select id="selDestAccount">
+                    <option value="">-- Selecione uma conta --</option>
+                    ${state.cache.accounts.map(a => `<option value="${a.id}" ${state.dest.accountId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join("")}
+                </select>
+             </label>
+        </div>
+
+        <p class="small" id="uploadTip">Suporta CSV, Excel (XLSX) e PDF (Extratos bancários).</p>
+        
+        <div class="form" style="border: 2px dashed #ccc; padding:20px; text-align:center;">
             <input type="file" id="fiUpload" accept=".csv,.xlsx,.xls,.pdf" style="display:none" />
             <button id="btnChoose" style="font-size:1.2em; padding:10px 20px;">📂 Escolher Arquivo</button>
             <div id="fileName" style="margin-top:10px; color:#666;"></div>
@@ -174,6 +194,45 @@ function renderStep1(cnt) {
     const btnChoose = cnt.querySelector("#btnChoose");
     const lbl = cnt.querySelector("#fileName");
     const btnNext = cnt.querySelector("#btnNext1");
+    const selImportType = cnt.querySelector("#selImportType");
+    const selDestAccount = cnt.querySelector("#selDestAccount");
+    const accountConfigArea = cnt.querySelector("#accountConfigArea");
+    const uploadTip = cnt.querySelector("#uploadTip");
+
+    function updateUploadUI() {
+        if (selImportType.value === "account") {
+            accountConfigArea.style.display = "block";
+            uploadTip.textContent = "Selecione um arquivo OFX ou QIF do seu banco.";
+            fi.accept = ".ofx,.qif";
+        } else {
+            accountConfigArea.style.display = "none";
+            uploadTip.textContent = "Suporta CSV, Excel (XLSX) e PDF (Extratos bancários).";
+            fi.accept = ".csv,.xlsx,.xls,.pdf";
+        }
+    }
+
+    selImportType.onchange = (e) => {
+        state.dest.importType = e.target.value;
+        updateUploadUI();
+        // Clear file when type changes
+        state.file = null;
+        lbl.textContent = "";
+        fi.value = "";
+        btnNext.disabled = true;
+    };
+
+    selDestAccount.onchange = (e) => {
+        state.dest.accountId = e.target.value;
+    };
+
+    updateUploadUI();
+
+    btnChoose.onclick = () => {
+        if (state.dest.importType === "account" && !state.dest.accountId) {
+            return alert("Por favor, selecione a Conta de Destino antes de anexar o arquivo.");
+        }
+        fi.click();
+    };
 
     btnChoose.onclick = () => fi.click();
 
@@ -209,7 +268,8 @@ function renderStep1(cnt) {
                         date: r.dateISO, // Map dateISO -> date
                         description: r.description,
                         value: r.amount, // Map amount -> value
-
+                        currency: r.currency || "BRL",
+                        fitid: r.fitid || "", // For OFX/QIF deduplication
                         categoryId: r.categoryId || "",
                         subcategoryId: r.subcategoryId || "",
 
@@ -319,10 +379,12 @@ function renderStep2(cnt) {
                         <th width="80">Valor</th>
                         <th width="110">Categoria</th>
                         <th width="110">Subcat</th>
-                        <th width="70">Parc.</th>
-                        <th width="60">Atual</th>
-                        <th width="80">Tipo</th>
-                        <th width="90">Pagador</th>
+                        ${state.dest.importType === 'card' ? `
+                            <th width="70">Parc.</th>
+                            <th width="60">Atual</th>
+                            <th width="80">Tipo</th>
+                            <th width="90">Pagador</th>
+                        ` : ''}
                     </tr>
                 </thead>
                 <tbody id="tblBody">
@@ -415,25 +477,26 @@ function renderStep2(cnt) {
                     </select>
                 </td>
                 
-                <td>
-                    <input type="number" class="rowTotalInst smallInput" data-idx="${i}" value="${r.totalInstallments || 1}" min="1" max="99" style="width:100%">
-                </td>
-                <td>
-                    <input type="number" class="rowCurrInst smallInput" data-idx="${i}" value="${r.currentInstallment || 1}" min="1" max="99" style="width:100%">
-                </td>
-
-                <td>
-                    <select class="rowType smallInput" data-idx="${i}" style="width:100%">
-                        <option value="fisico" ${r.cardType === 'fisico' ? 'selected' : ''}>Físico</option>
-                        <option value="virtual" ${r.cardType === 'virtual' ? 'selected' : ''}>Virtual</option>
-                    </select>
-                </td>
-                <td>
-                    <select class="rowPay smallInput" data-idx="${i}" style="width:100%">
-                        <option value="main" ${r.payerRole === 'main' ? 'selected' : ''}>Titular</option>
-                        <option value="additional" ${r.payerRole === 'additional' ? 'selected' : ''}>Adicional</option>
-                    </select>
-                </td>
+                ${state.dest.importType === 'card' ? `
+                    <td>
+                        <input type="number" class="rowTotalInst smallInput" data-idx="${i}" value="${r.totalInstallments || 1}" min="1" max="99" style="width:100%">
+                    </td>
+                    <td>
+                        <input type="number" class="rowCurrInst smallInput" data-idx="${i}" value="${r.currentInstallment || 1}" min="1" max="99" style="width:100%">
+                    </td>
+                    <td>
+                        <select class="rowType smallInput" data-idx="${i}" style="width:100%">
+                            <option value="fisico" ${r.cardType === 'fisico' ? 'selected' : ''}>Físico</option>
+                            <option value="virtual" ${r.cardType === 'virtual' ? 'selected' : ''}>Virtual</option>
+                        </select>
+                    </td>
+                    <td>
+                        <select class="rowPay smallInput" data-idx="${i}" style="width:100%">
+                            <option value="main" ${r.payerRole === 'main' ? 'selected' : ''}>Titular</option>
+                            <option value="additional" ${r.payerRole === 'additional' ? 'selected' : ''}>Adicional</option>
+                        </select>
+                    </td>
+                ` : ''}
             `;
             fragment.appendChild(tr);
         }
@@ -556,20 +619,22 @@ function renderStepBatchReview(cnt) {
                 <label>Pessoa
                     <select id="batchPerson">${personOpts}</select>
                 </label>
-                <label>Portador (Role)
-                    <select id="batchRole">
-                        <option value="">(Não Alterar)</option>
-                        <option value="main">Titular</option>
-                        <option value="additional">Adicional</option>
-                    </select>
-                </label>
-                <label>Tipo Cartão
-                    <select id="batchType">
-                        <option value="">(Não Alterar)</option>
-                        <option value="fisico">Físico</option>
-                        <option value="virtual">Virtual</option>
-                    </select>
-                </label>
+                ${state.dest.importType === 'card' ? `
+                    <label>Portador (Role)
+                        <select id="batchRole">
+                            <option value="">(Não Alterar)</option>
+                            <option value="main">Titular</option>
+                            <option value="additional">Adicional</option>
+                        </select>
+                    </label>
+                    <label>Tipo Cartão
+                        <select id="batchType">
+                            <option value="">(Não Alterar)</option>
+                            <option value="fisico">Físico</option>
+                            <option value="virtual">Virtual</option>
+                        </select>
+                    </label>
+                ` : '<div></div><div></div>'}
             </div>
 
             <div style="margin-top:10px; display:flex; gap:10px; justify-content:space-between;">
@@ -680,8 +745,13 @@ function renderStepBatchReview(cnt) {
         const subId = batchSub.value;
         const tagsVal = cnt.querySelector("#batchTags").value.trim();
         const personId = cnt.querySelector("#batchPerson").value;
-        const role = cnt.querySelector("#batchRole").value;
-        const type = cnt.querySelector("#batchType").value;
+
+        let role = null;
+        let type = null;
+        if (state.dest.importType === 'card') {
+            role = cnt.querySelector("#batchRole").value;
+            type = cnt.querySelector("#batchType").value;
+        }
 
         // Validation: if user selected sub but no cat, usually UI prevents, but logic check:
         // If cat is (Não Alterar) but sub is (Invalid).. sub is disabled so OK.
@@ -881,12 +951,9 @@ function renderStepDestination(cnt) {
     const selected = state.rows.filter(r => r.selected);
     const totalVal = selected.reduce((sum, r) => sum + r.value, 0);
 
-    cnt.innerHTML = `
-        <h3>4. Destino da Importação</h3>
-        <p>Você selecionou <strong>${selected.length}</strong> transações.</p>
-        <p>Valor Total: <strong style="${totalVal < 0 ? 'color:red' : 'color:green'}">R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
-
-        <div class="card" style="background:#f9f9f9; padding:15px; border:1px solid #ddd;">
+    let destFormFields = "";
+    if (state.dest.importType === "card") {
+        destFormFields = `
             <div class="form grid">
                 <label>Cartão de Crédito (Obrigatório)
                     <select id="dstCard" required>
@@ -894,6 +961,52 @@ function renderStepDestination(cnt) {
                         ${state.cache.cards.map(c => `<option value="${c.id}" ${state.dest.cardId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join("")}
                     </select>
                 </label>
+                
+                <label>Mês da Fatura (Obrigatório)
+                    <input type="month" id="dstMonth" value="${state.dest.invoiceMonth}" required>
+                </label>
+
+                <label>Portador Padrão (Se não definido na linha)
+                     <select id="dstHolder">
+                        <option value="main" ${state.dest.cardHolder === 'main' ? 'selected' : ''}>Titular</option>
+                        <option value="additional" ${state.dest.cardHolder === 'additional' ? 'selected' : ''}>Adicional</option>
+                     </select>
+                </label>
+            </div>
+            <div class="form grid" style="margin-top:10px;">
+                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Faturas Internacionais)
+                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
+                </label>
+            </div>
+        `;
+    } else {
+        const destAcc = state.cache.accounts.find(a => a.id === state.dest.accountId);
+
+        destFormFields = `
+            <div class="form grid">
+                <label>Conta de Destino Selecionada
+                    <select id="dstAccount" disabled>
+                        <option value="${destAcc ? destAcc.id : ''}">${destAcc ? esc(destAcc.name) : '---'}</option>
+                    </select>
+                </label>
+            </div>
+            <!-- If we detect USD in OFX, we can ask for FX Rate here too for the full OFX -->
+            <div class="form grid" style="margin-top:10px;">
+                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Contas Internacionais)
+                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
+                </label>
+            </div>
+            <p class="small" style="color:#666; margin-top:5px;">Esta configuração foi definida no Passo 1 (Extrato OFX/QIF).</p>
+        `;
+    }
+
+    cnt.innerHTML = `
+        <h3>4. Destino da Importação</h3>
+        <p>Você selecionou <strong>${selected.length}</strong> transações.</p>
+        <p>Valor Total: <strong style="${totalVal < 0 ? 'color:red' : 'color:green'}">R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
+
+        <div class="card" style="background:#f9f9f9; padding:15px; border:1px solid #ddd;">
+            ${destFormFields}
                 
                 <label>Mês da Fatura (Obrigatório)
                     <input type="month" id="dstMonth" value="${state.dest.invoiceMonth}" required>
@@ -919,50 +1032,73 @@ function renderStepDestination(cnt) {
         </div>
     `;
 
-    const dstCard = cnt.querySelector("#dstCard");
     const wrpFx = cnt.querySelector("#wrapperFxRate");
 
-    // Check initial state
-    const initC = state.cache.cards.find(x => x.id === dstCard.value);
-    if (initC && initC.currency === "USD") wrpFx.style.display = "block";
+    if (state.dest.importType === "card") {
+        const dstCard = cnt.querySelector("#dstCard");
 
-    dstCard.onchange = () => {
-        const c = state.cache.cards.find(x => x.id === dstCard.value);
-        if (c && c.currency === "USD") {
+        // Check initial state
+        const initC = state.cache.cards.find(x => x.id === dstCard.value);
+        if (initC && initC.currency === "USD") wrpFx.style.display = "block";
+
+        dstCard.onchange = () => {
+            const c = state.cache.cards.find(x => x.id === dstCard.value);
+            if (c && c.currency === "USD") {
+                wrpFx.style.display = "block";
+            } else {
+                wrpFx.style.display = "none";
+                cnt.querySelector("#dstFxRate").value = "";
+            }
+        };
+    } else {
+        // For accounts, check if any row has currency mapping needed
+        const hasUSD = state.rows.some(r => r.selected && r.currency === "USD");
+        if (hasUSD) {
             wrpFx.style.display = "block";
-        } else {
-            wrpFx.style.display = "none";
-            cnt.querySelector("#dstFxRate").value = "";
         }
-    };
+    }
 
     cnt.querySelector(".backBtn").onclick = () => {
-        // Save state values before going back?
-        state.dest.cardId = cnt.querySelector("#dstCard").value;
-        state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
-        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+        if (state.dest.importType === "card") {
+            state.dest.cardId = cnt.querySelector("#dstCard").value;
+            state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
+            state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+        }
         state.step = 3; // Go back to Batch Review
         renderDispatcher(cnt);
     };
 
     cnt.querySelector(".nextBtn").onclick = () => {
-        const cardId = cnt.querySelector("#dstCard").value;
-        const mon = cnt.querySelector("#dstMonth").value;
+        if (state.dest.importType === "card") {
+            const cardId = cnt.querySelector("#dstCard").value;
+            const mon = cnt.querySelector("#dstMonth").value;
 
-        if (!cardId || !mon) return alert("Por favor, preencha Cartão e Mês da Fatura.");
+            if (!cardId || !mon) return alert("Por favor, preencha Cartão e Mês da Fatura.");
 
-        state.dest.cardId = cardId;
-        state.dest.invoiceMonth = mon;
-        state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
+            state.dest.cardId = cardId;
+            state.dest.invoiceMonth = mon;
+            state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
 
-        const c = state.cache.cards.find(x => x.id === cardId);
-        if (c && c.currency === "USD") {
-            const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
-            state.dest.fxRate = isNaN(fx) ? null : fx;
-            state.dest.isUSD = true;
+            const c = state.cache.cards.find(x => x.id === cardId);
+            if (c && c.currency === "USD") {
+                const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
+                state.dest.fxRate = isNaN(fx) ? null : fx;
+                state.dest.isUSD = true;
+            } else {
+                state.dest.fxRate = null;
+                state.dest.isUSD = false;
+            }
         } else {
-            state.dest.fxRate = null;
-            state.dest.isUSD = false;
+            // Account destination parameters
+            const hasUSD = state.rows.some(r => r.selected && r.currency === "USD");
+            if (hasUSD) {
+                const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
+                state.dest.fxRate = isNaN(fx) ? null : fx;
+                state.dest.isUSD = true; // Signals that there are USD conversions to be done
+            } else {
+                state.dest.fxRate = null;
+                state.dest.isUSD = false;
+            }
         }
 
         state.step = 5; // Go to Processing
@@ -1016,47 +1152,63 @@ async function startImportProcess(cnt) {
         const chunk = selected.slice(i, i + BATCH_SIZE);
 
         await Promise.all(chunk.map(async (row) => {
-            const tx = {
+            const isExpense = row.value < 0;
+            const absoluteValue = Math.abs(row.value);
+
+            const commonProps = {
                 id: uid("tx"),
                 created_at: new Date().toISOString(),
                 date: row.date || new Date().toISOString().split("T")[0],
-                purchaseDate: row.date,
-                invoiceMonth: state.dest.invoiceMonth,
-                billMonth: state.dest.invoiceMonth,
-
                 description: row.description,
-                value: Math.abs(row.value), // Store absolute
-                type: row.value > 0 ? "card_payment" : "expense", // Postivie = Payment/Refund, Negative = Expense (standard statement)
-
-                cardId: state.dest.cardId,
-                personId: "", // Not using Person ID in this flow anymore, using Holder/Role
+                value: absoluteValue,
 
                 categoryId: row.categoryId || "",
                 subcategory: row.subcategoryId || "",
-                tags: row.tags ? row.tags.split(",").map(t => t.trim()) : [],
+                tags: row.tags ? (Array.isArray(row.tags) ? row.tags : row.tags.split(",").map(t => t.trim())) : [],
 
-                cardType: row.cardType || "fisico",
-                // Valid cardHolder values: 'main' | 'additional'
-                cardHolder: (row.payerRole === "main" || row.payerRole === "additional")
-                    ? row.payerRole
-                    : state.dest.cardHolder,
+                personId: row.personId || "",
 
                 import_session_id: state.importSessionId
             };
 
-            // Correction: If user selected "virtual", usage is virtual. 
-            // If they selected "additional", usage is physical usually, but role is additional.
-            // The UI logic is split: Type (Physical/Virtual) vs Payer (Main/Additional).
-            // Schema likely expects cardHolder to be 'main' or 'additional'.
-
-            if (state.dest.isUSD) {
+            // Handle USD logic
+            if (row.currency === "USD") {
                 const finalRate = state.dest.fxRate || usdRateGlob;
-                tx.currency = "USD";
-                tx.fxRate = finalRate;
-                tx.valueBRL = tx.value * finalRate;
+                commonProps.currency = "USD";
+                commonProps.fxRate = finalRate;
+                commonProps.valueBRL = absoluteValue * finalRate;
+            } else {
+                commonProps.currency = "BRL";
             }
 
-            await put("transactions", tx);
+            let finalTx;
+
+            if (state.dest.importType === "card") {
+                // Card Export Structure
+                finalTx = {
+                    ...commonProps,
+                    type: isExpense ? "expense" : "card_payment",
+
+                    purchaseDate: row.date,
+                    invoiceMonth: state.dest.invoiceMonth,
+                    billMonth: state.dest.invoiceMonth,
+                    cardId: state.dest.cardId,
+                    cardType: row.cardType || "fisico",
+                    cardHolder: (row.payerRole === "main" || row.payerRole === "additional")
+                        ? row.payerRole : state.dest.cardHolder
+                };
+            } else {
+                // Account Export Structure (OFX/QIF)
+                finalTx = {
+                    ...commonProps,
+                    type: isExpense ? "expense" : "revenue", // OFX/QIF positive equals revenue (or transfer, but revenue is safe default)
+                    accountId: state.dest.accountId,
+                    importId: row.fitid || undefined, // For OFX fits or QIF pseudo-hashes
+                    importSource: row.fitid ? (row.fitid.startsWith('qif-') ? "qif" : "ofx") : undefined
+                };
+            }
+
+            await put("transactions", finalTx);
         }));
 
         processed += chunk.length;
@@ -1073,12 +1225,20 @@ async function startImportProcess(cnt) {
     progText.textContent = "Concluído!";
     finalMsg.style.display = "block";
 
-    // Update Invoice State (Circuit Breaker pattern - safe update)
-    try {
-        setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
-    } catch (e) { console.warn("Invoice update warning", e); }
+    if (state.dest.importType === "card") {
+        // Update Invoice State (Circuit Breaker pattern - safe update)
+        try {
+            setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
+        } catch (e) { console.warn("Invoice update warning", e); }
 
-    btnFinish.onclick = () => {
-        location.hash = "#invoices";
-    };
+        btnFinish.textContent = "Ver Faturas";
+        btnFinish.onclick = () => {
+            location.hash = "#invoices";
+        };
+    } else {
+        btnFinish.textContent = "Ver Lançamentos";
+        btnFinish.onclick = () => {
+            location.hash = "#tx";
+        };
+    }
 }

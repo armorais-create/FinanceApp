@@ -1,5 +1,6 @@
 
 import { list, put, uid, get, deleteInvoice, deleteTransaction, updateTransaction, addInvoicePayment, listInvoicePaymentsByInvoiceKey, deleteInvoicePayment, makeInvoiceKey } from "../db.js";
+import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 import { isInvoicePayment } from "./tx.js";
 
 function esc(s) {
@@ -11,6 +12,7 @@ function esc(s) {
 
 let currentCardId = "";
 let currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+let _searchState = { ...defaultSearchState };
 
 export function setInvoiceState(cardId, month) {
     if (cardId) currentCardId = cardId;
@@ -18,6 +20,14 @@ export function setInvoiceState(cardId, month) {
 }
 
 export async function invoiceScreen() {
+    // Parse deep link params before rendering
+    const hashParts = location.hash.split("?");
+    if (hashParts[1]) {
+        const params = new URLSearchParams(hashParts[1]);
+        if (params.get("card")) currentCardId = params.get("card");
+        if (params.get("month")) currentMonth = params.get("month");
+    }
+
     const cards = await list("cards");
     const accounts = await list("accounts");
 
@@ -35,24 +45,34 @@ async function renderInvoiceView(cards, accounts) {
 
     // --- Fetch Transactions ---
     const allTxs = await list("transactions");
-    const invoiceTxs = allTxs.filter(t =>
+    let invoiceTxs = allTxs.filter(t =>
         t.cardId === currentCardId &&
         t.invoiceMonth === currentMonth
     ).sort((a, b) => b.date.localeCompare(a.date));
 
     // --- Fetch Payments ---
     const invoiceKey = makeInvoiceKey(currentCardId, currentMonth);
-    const invoicePayments = await listInvoicePaymentsByInvoiceKey(invoiceKey);
+    let invoicePayments = await listInvoicePaymentsByInvoiceKey(invoiceKey);
     // Sort payments by date descending
     invoicePayments.sort((a, b) => b.date.localeCompare(a.date));
 
+    // Categories/People/Tags for Edit Modal and Search
+    const categories = await list("categories");
+    const people = await list("people");
+    const tags = await list("tags");
+
+    // Apply specific Global Search functionality
+    let filteredInvoiceTxs = applyGlobalSearch(invoiceTxs, _searchState, categories, people);
+    let filteredInvoicePayments = applyGlobalSearch(invoicePayments.map(p => ({ ...p, name: `Pagamento Fatura ${p.holder === 'main' ? 'Titular' : 'Adicional'}` })), _searchState, categories, people);
+    // Unmap the fake name property so it doesn't leak or just let it be. Only used for search.
+
     const isExp = (t) => t.type === "expense" && t.kind !== "INVOICE_PAYMENT";
 
-    const mainExpenses = invoiceTxs.filter(t => (t.cardHolder === "main" || !t.cardHolder) && isExp(t));
-    const mainPayments = invoicePayments.filter(t => t.holder === "main");
+    const mainExpenses = filteredInvoiceTxs.filter(t => (t.cardHolder === "main" || !t.cardHolder) && isExp(t));
+    const mainPayments = filteredInvoicePayments.filter(t => t.holder === "main");
 
-    const addExpenses = invoiceTxs.filter(t => t.cardHolder === "additional" && isExp(t));
-    const addPayments = invoicePayments.filter(t => t.holder === "additional");
+    const addExpenses = filteredInvoiceTxs.filter(t => t.cardHolder === "additional" && isExp(t));
+    const addPayments = filteredInvoicePayments.filter(t => t.holder === "additional");
 
     const sumVal = (arr, key = "value") => arr.reduce((sum, t) => sum + (t.valueBRL || t[key] || 0), 0);
 
@@ -82,11 +102,6 @@ async function renderInvoiceView(cards, accounts) {
     const card = cards.find(c => c.id === currentCardId);
     const currency = card?.currency || "BRL";
 
-    // Categories/People/Tags for Edit Modal
-    const categories = await list("categories");
-    const people = await list("people");
-    const tags = await list("tags");
-
     // Define options locally
     const catOpts = `<option value="">(Sem Categoria)</option>` + categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     const peopleOpts = `<option value="">(Sem Pessoa)</option>` + people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
@@ -114,6 +129,10 @@ async function renderInvoiceView(cards, accounts) {
         <div style="margin-top:5px; text-align:right;">
              <button id="btnDeleteInvoice" class="danger small" style="padding:4px 8px;">Excluir Fatura</button>
         </div>
+        
+        <div id="invSearchContainer" style="margin-top: 10px;">
+            ${renderGlobalSearch(_searchState, categories, people, tags)}
+        </div>
     </div>
 
     <!--Summary -->
@@ -136,7 +155,7 @@ async function renderInvoiceView(cards, accounts) {
                 <span class="small"> (${totalMain.toFixed(2)} - ${paidMain.toFixed(2)})</span>
             </div>
         </div>
-        <ul class="list">
+        <ul class="list" id="mainInvoiceList">
             ${mainExpenses.length ? mainExpenses.map(t => renderItem(t)).join("") : `<div class="small">Nenhuma compra.</div>`}
             ${mainPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold; color:green">Pagamentos:</div>` : ""}
             ${mainPayments.map(p => renderPaymentItem(p)).join("")}
@@ -157,7 +176,7 @@ async function renderInvoiceView(cards, accounts) {
                 <span class="small"> (${totalAdd.toFixed(2)} - ${paidAdd.toFixed(2)})</span>
             </div>
         </div>
-        <ul class="list">
+        <ul class="list" id="addInvoiceList">
             ${addExpenses.length ? addExpenses.map(t => renderItem(t)).join("") : `<div class="small">Nenhuma compra.</div>`}
             ${addPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold; color:green">Pagamentos:</div>` : ""}
             ${addPayments.map(p => renderPaymentItem(p)).join("")}
@@ -333,6 +352,9 @@ export async function wireInvoiceHandlers(rootEl) {
     const monthInput = rootEl.querySelector("#invMonthInput");
     if (cardSelect) cardSelect.onchange = (e) => { currentCardId = e.target.value; refreshInvoice(rootEl); };
     if (monthInput) monthInput.onchange = (e) => { currentMonth = e.target.value; refreshInvoice(rootEl); };
+
+    // Initialize Global Search
+    wireGlobalSearch(rootEl, _searchState, () => refreshInvoice(rootEl));
 
     // 2. Delete Invoice + Payments (Cascaded)
     const delInvBtn = rootEl.querySelector("#btnDeleteInvoice");
@@ -563,6 +585,24 @@ export async function wireInvoiceHandlers(rootEl) {
             refreshInvoice(rootEl);
         };
     }
+
+    // Deep Link Highlight
+    setTimeout(() => {
+        const hashParts = location.hash.split("?");
+        if (hashParts[1]) {
+            const params = new URLSearchParams(hashParts[1]);
+            const highlightId = params.get("highlight");
+            if (highlightId) {
+                const el = rootEl.querySelector(`[data-id="${highlightId}"]`)?.closest('li');
+                if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.style.backgroundColor = "#e2f0d9";
+                    el.style.transition = "background-color 2s";
+                    setTimeout(() => el.style.backgroundColor = "", 2000);
+                }
+            }
+        }
+    }, 50);
 }
 
 function openEditDialog(rootEl, tx) {
@@ -642,6 +682,17 @@ function openEditDialog(rootEl, tx) {
 async function refreshInvoice(rootEl) {
     const cards = await list("cards");
     const accounts = await list("accounts");
+
+    // Check if we need to apply search UI first before full re-render
+    const categories = await list("categories");
+    const tags = await list("tags");
+    const people = await list("people");
+
+    // We already do a full re-render, so just update it
     rootEl.innerHTML = await renderInvoiceView(cards, accounts);
+
+    // Need to apply search logic over the lists
+    // Actually, renderInvoiceView doesn't apply the search filtering. I need to fix it.
+    // I am modifying renderInvoiceView to apply the search. 
     wireInvoiceHandlers(rootEl);
 }
