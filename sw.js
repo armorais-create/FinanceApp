@@ -1,5 +1,5 @@
 // sw.js
-const APP_VERSION = "2026-02-15-1"; // <-- aumente quando publicar update
+const APP_VERSION = "2026-02-22-1"; // <-- aumente quando publicar update
 const CACHE_NAME = `financeapp-${APP_VERSION}`;
 
 const CORE_ASSETS = [
