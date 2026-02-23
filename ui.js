@@ -18,6 +18,9 @@ export async function settingsScreen() {
     const settings = (await get("settings", "config")) || { usdRate: 0 };
     const rules = (await list("rules")).sort((a, b) => (a.priority || 0) - (b.priority || 0));
 
+    const budgetTemplates = await list("budget_templates");
+    const budgetOverrides = await list("budget_overrides");
+
     // UI Choices stored in settings
     const uiState = (await get("settings", "ui_cat_view"));
     const selectedCatId = uiState ? uiState.value : null;
@@ -470,8 +473,94 @@ export async function settingsScreen() {
         </div>
     `;
 
+    // --- BUDGET UI ---
+    const getBudgetTarget = (tmplId, month = new Date().toISOString().slice(0, 7)) => {
+      const ov = budgetOverrides.find(o => o.templateId === tmplId && o.month === month);
+      return ov ? { val: ov.targetCents, type: 'override' } : { val: null, type: 'none' };
+    };
 
-    // ... rest of sections ...
+    const budgetSection = `
+    <div class="card">
+        <div><strong>Orçamentos do Mês</strong></div>
+        <div class="small" style="color:#666; margin-bottom:10px;">Defina limites de gastos mensais por Categoria. Você poderá visualizar o progresso no Painel.</div>
+        <form id="budgetTemplateForm" class="form grid" style="background:#f9f9f9; padding:10px; border-radius:5px;">
+            <input type="hidden" name="id" />
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                 <strong id="budgetTempFormTitle">Novo Orçamento</strong>
+                 <button type="button" id="btnCancelEditBudget" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar</button>
+            </div>
+
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
+                <input name="name" placeholder="Nome (ex: Supermercado)" required />
+                <div style="display:flex; gap:5px; align-items:center;">
+                    <span style="font-size:0.9em">R$ Mensal Padrão</span>
+                    <input name="monthlyTarget" type="number" step="0.01" placeholder="Ex: 1500.00" required />
+                </div>
+            </div>
+
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
+                <select name="categoryId" id="budgetTempCategory" required>
+                    <option value="">Selecione Categoria...</option>
+                    ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
+                </select>
+                <select name="subcategoryId" id="budgetTempSubcategory" disabled>
+                    <option value="">(Todas Subcategorias)</option>
+                </select>
+            </div>
+
+            <div class="grid" style="grid-template-columns: 1fr; gap:5px; margin-top:5px;">
+                <select name="personId">
+                    <option value="">(Qualquer Pessoa)</option>
+                    ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
+                </select>
+            </div>
+
+            <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
+                <input type="checkbox" name="active" checked /> Ativo
+            </label>
+            <button type="submit" id="btnSaveBudget" style="margin-top:5px;">Salvar Orçamento</button>
+        </form>
+
+        <div style="margin-top:15px;">
+            <ul class="list">
+                 ${budgetTemplates.length === 0 ? '<div class="small">Nenhum orçamento configurado.</div>' : ''}
+                 ${budgetTemplates.sort((a, b) => a.name.localeCompare(b.name)).map(t => {
+      const currentOv = getBudgetTarget(t.id);
+      const val = currentOv.type === 'override' ? currentOv.val : t.monthlyTargetCents;
+
+      const cName = categories.find(c => c.id === t.categoryId)?.name || "?";
+      const sName = t.subcategoryId ? " > " + (subcategories.find(s => s.id === t.subcategoryId)?.name || "") : "";
+      const scopeDesc = cName + sName;
+
+      return `
+                    <li class="listItem">
+                        <div style="flex:1">
+                            <div style="display:flex; justify-content:space-between;">
+                                <strong>${esc(t.name)}</strong>
+                                <span class="small" style="font-weight:bold; color:${currentOv.type === 'override' ? 'orange' : '#007bff'}">
+                                    Mês Atual: R$ ${(val / 100).toFixed(2)}
+                                </span>
+                            </div>
+                            <div class="small" style="color:#666">
+                                ${scopeDesc} ${t.personId ? ` • ${people.find(p => p.id === t.personId)?.name}` : ""}
+                            </div>
+                            <div class="small" style="color:#999; margin-top:2px;">(Padrão Mensal: R$ ${(t.monthlyTargetCents / 100).toFixed(2)})</div>
+                            
+                            <div style="margin-top:5px;">
+                                <button type="button" class="small" data-action="open-budget-details" data-id="${t.id}" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:3px;">🔍 Ver Detalhes / Ajustes</button>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:5px; align-items:flex-start;">
+                             <button type="button" class="iconBtn" data-action="edit-budget-temp" data-tmpl="${esc(JSON.stringify(t))}">✎</button>
+                             <button type="button" class="danger iconBtn" data-del="budget_templates:${t.id}">×</button>
+                        </div>
+                    </li>
+      `;
+    }).join("")}
+            </ul>
+        </div>
+    </div>
+    `;
 
     return `
   <style>
@@ -480,6 +569,7 @@ export async function settingsScreen() {
   ${backupUi()}
   ${rateSection}
   ${rulesSection}
+  ${budgetSection}
   ${goalsSection}
   ${catSection}
   ${tagSection}
@@ -579,8 +669,28 @@ export async function wireSettingsHandlers(rootEl) {
   const btnExportPack = rootEl.querySelector("#btnExportPack");
   const btnImportPack = rootEl.querySelector("#btnImportPack");
   const btnReset = rootEl.querySelector("#btnReset");
+  const btnSafeMode = rootEl.querySelector("#btnSafeMode");
+  const btnRestartApp = rootEl.querySelector("#btnRestartApp");
   const fileInput = rootEl.querySelector("#importFile");
   const importPackFile = rootEl.querySelector("#importPackFile");
+
+  if (btnSafeMode) {
+    btnSafeMode.onclick = () => {
+      if (confirm("Isso limpará as preferências de interface salvas e recarregará o aplicativo. Útil se alguma tela estiver travada. Continuar?")) {
+        localStorage.clear();
+        sessionStorage.clear();
+        alert("Preferências limpas. O app será reiniciado.");
+        location.hash = "#home";
+        location.reload();
+      }
+    };
+  }
+
+  if (btnRestartApp) {
+    btnRestartApp.onclick = () => {
+      location.reload();
+    };
+  }
 
   if (btnExportPack) {
     btnExportPack.onclick = async () => {
@@ -1454,7 +1564,104 @@ export async function wireSettingsHandlers(rootEl) {
       }
     });
   }
-}
+
+  // --- Budget Templates Handlers 19C-1 ---
+  const bForm = rootEl.querySelector("#budgetTemplateForm");
+  if (bForm) {
+    const selCat = bForm.querySelector("#budgetTempCategory");
+    const selSub = bForm.querySelector("#budgetTempSubcategory");
+
+    const updateBudgetSubs = async (catId) => {
+      selSub.innerHTML = '<option value="">(Todas Subcategorias)</option>';
+      if (!catId) {
+        selSub.disabled = true;
+        return;
+      }
+      const subs = await list("subcategories");
+      const filtered = subs.filter(s => s.categoryId === catId);
+      if (filtered.length > 0) {
+        selSub.disabled = false;
+        selSub.innerHTML += filtered.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+      } else {
+        selSub.disabled = true;
+      }
+    };
+
+    selCat.addEventListener("change", (e) => updateBudgetSubs(e.target.value));
+
+    bForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      let id = fd.get("id");
+      const isEdit = !!id;
+
+      const tmpl = {
+        id: id || uid("bt"),
+        name: fd.get("name"),
+        categoryId: fd.get("categoryId"),
+        subcategoryId: fd.get("subcategoryId") || null,
+        personId: fd.get("personId") || null,
+        monthlyTargetCents: Math.round(parseFloat(fd.get("monthlyTarget").replace(",", ".")) * 100),
+        active: fd.get("active") === "on",
+        createdAt: isEdit ? undefined : new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (isEdit) {
+        const old = await get("budget_templates", id);
+        if (old) tmpl.createdAt = old.createdAt;
+      }
+      await put("budget_templates", tmpl);
+
+      e.target.reset();
+      await refreshSettings(rootEl);
+    });
+
+    rootEl.addEventListener("click", async (e) => {
+      // Edit Budget
+      const btnEdit = e.target.closest("[data-action='edit-budget-temp']");
+      if (btnEdit) {
+        const tmpl = JSON.parse(btnEdit.dataset.tmpl);
+        const f = bForm;
+
+        f.querySelector("[name=id]").value = tmpl.id;
+        f.querySelector("[name=name]").value = tmpl.name;
+        f.querySelector("[name=monthlyTarget]").value = (tmpl.monthlyTargetCents / 100).toFixed(2);
+        f.querySelector("[name=active]").checked = tmpl.active !== false;
+        f.querySelector("[name=personId]").value = tmpl.personId || "";
+        f.querySelector("[name=categoryId]").value = tmpl.categoryId;
+
+        await updateBudgetSubs(tmpl.categoryId);
+        f.querySelector("[name=subcategoryId]").value = tmpl.subcategoryId || "";
+
+        document.getElementById("budgetTempFormTitle").innerText = "Editar Orçamento";
+        document.getElementById("btnSaveBudget").innerText = "Salvar Alterações";
+        document.getElementById("btnCancelEditBudget").style.display = "block";
+        f.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+
+      // Cancel Edit
+      if (e.target.id === "btnCancelEditBudget") {
+        bForm.reset();
+        bForm.querySelector("[name=id]").value = "";
+        updateBudgetSubs("");
+        document.getElementById("budgetTempFormTitle").innerText = "Novo Orçamento";
+        document.getElementById("btnSaveBudget").innerText = "Salvar Orçamento";
+        e.target.style.display = "none";
+        return;
+      }
+
+      // Open Budget Details Modal
+      const btnDetails = e.target.closest("[data-action='open-budget-details']");
+      if (btnDetails) {
+        const tmplId = btnDetails.dataset.id;
+        renderBudgetDetailsModal(tmplId);
+        return;
+      }
+    });
+  }
+} // Ends wireSettingsHandlers
 
 // Handle Deletion (Global delegation on body to ensure capture)
 // DEPRECATED: Handled globally in app.js now.
@@ -1467,4 +1674,181 @@ export async function wireSettingsHandlers(rootEl) {
 async function refreshSettings(rootEl) {
   rootEl.innerHTML = await settingsScreen();
   await wireSettingsHandlers(rootEl);
+}
+
+// =========================================
+// BUDGET DETAILS MODAL (19C-2)
+// =========================================
+export async function renderBudgetDetailsModal(tmplId, initialMonth) {
+  const modalId = "budgetDetailsModal";
+  let existing = document.getElementById(modalId);
+  if (existing) existing.remove();
+
+  const tmpl = await get("budget_templates", tmplId);
+  if (!tmpl) return;
+
+  const m = document.createElement("div");
+  m.id = modalId;
+  m.style.cssText = "position:fixed; top:0; left:0; right:0; bottom:0; overflow-y:auto; background:rgba(0,0,0,0.6); z-index:9999; padding:20px; display:flex; justify-content:center; align-items:flex-start;";
+
+  m.innerHTML = `
+    <div class="card" style="width:100%; max-width:500px; margin-top:20px; position:relative;">
+        <button id="btnCloseBudgetModal" style="position:absolute; top:10px; right:10px; background:none; border:none; font-size:1.5em; cursor:pointer;">&times;</button>
+        <div id="budgetModalContent">Carregando...</div>
+    </div>
+  `;
+
+  document.body.appendChild(m);
+
+  const contentEl = m.querySelector("#budgetModalContent");
+  const btnClose = m.querySelector("#btnCloseBudgetModal");
+  btnClose.onclick = () => {
+    m.remove();
+    // Trigger a fake hash change to refresh data on screen if needed
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  };
+
+  let currentMonth = initialMonth || new Date().toISOString().slice(0, 7);
+
+  async function renderContent() {
+    const budgetOverrides = await list("budget_overrides") || [];
+    const txs = await list("transactions") || [];
+    const categories = await list("categories") || [];
+    const subcategories = await list("subcategories") || [];
+    const people = await list("people") || [];
+
+    const cName = categories.find(c => c.id === tmpl.categoryId)?.name || "?";
+    const sName = tmpl.subcategoryId ? " > " + (subcategories.find(s => s.id === tmpl.subcategoryId)?.name || "") : "";
+    const scopeDesc = cName + sName + (tmpl.personId ? ` • ${people.find(p => p.id === tmpl.personId)?.name}` : "");
+
+    const ov = budgetOverrides.find(o => o.templateId === tmplId && o.month === currentMonth);
+    const targetCents = ov ? ov.targetCents : tmpl.monthlyTargetCents;
+
+    const budgetTxs = txs.filter(t => {
+      const txDate = t.date ? t.date.slice(0, 7) : "";
+      if (txDate !== currentMonth) return false;
+      if (t.type !== "expense") return false;
+      if (t.categoryId !== tmpl.categoryId) return false;
+      if (tmpl.subcategoryId && t.subcategory !== tmpl.subcategoryId) return false;
+      if (tmpl.personId && t.personId !== tmpl.personId) return false;
+      return true;
+    });
+
+    budgetTxs.sort((a, b) => b.date.localeCompare(a.date));
+
+    const spent = budgetTxs.reduce((sum, t) => sum + (t.valueBRL || t.value), 0);
+    const target = targetCents / 100;
+    const remaining = target - spent;
+    let pct = target > 0 ? (spent * 100) / target : 0;
+
+    const boundedPct = Math.min(100, pct);
+    const color = pct >= 100 ? '#dc3545' : (pct >= 80 ? '#fd7e14' : '#28a745');
+
+    contentEl.innerHTML = `
+          <h3 style="margin-top:0; margin-bottom:5px;">${esc(tmpl.name)}</h3>
+          <div class="small" style="color:#666; margin-bottom:15px;">${esc(scopeDesc)}</div>
+          
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+              <strong>Mês:</strong> 
+              <input type="month" id="budgetModalMonth" value="${currentMonth}" style="padding:5px; border-radius:4px; border:1px solid #ccc; font-size:1em;" />
+          </div>
+
+          <div style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center;">
+              ${target === 0 ? `<div style="color:#dc3545; font-weight:bold;">Defina uma meta para calcular</div>` : `
+              <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                  <div>
+                      <div class="small">Meta</div>
+                      <strong>R$ ${target.toFixed(2)}</strong> ${ov ? '<br/><span class="small" style="color:#fd7e14;" title="Ajuste Ocasional">(Ajustado)</span>' : ''}
+                  </div>
+                  <div>
+                      <div class="small">Gasto</div>
+                      <strong>R$ ${spent.toFixed(2)}</strong>
+                  </div>
+                  <div>
+                      <div class="small">${remaining < 0 ? 'Excedeu' : 'Restante'}</div>
+                      <strong style="color:${remaining < 0 ? '#dc3545' : '#28a745'}">R$ ${Math.abs(remaining).toFixed(2)}</strong>
+                  </div>
+              </div>
+              <div style="background:#ddd; height:12px; border-radius:6px; overflow:hidden;">
+                  <div style="width:${boundedPct}%; background:${color}; height:100%;"></div>
+              </div>
+              <div class="small" style="margin-top:5px; text-align:right;">${pct.toFixed(1)}%</div>
+              `}
+          </div>
+
+          <div style="display:flex; gap:10px; margin-bottom:20px;">
+              <button id="btnBudgetOverride" type="button" style="flex:1; background:#17a2b8; color:white; padding:8px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">✏️ Ajustar Meta</button>
+              <button id="btnBudgetCopy" type="button" style="flex:1; background:#6c757d; color:white; padding:8px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">📋 Copiar Resumo</button>
+          </div>
+
+          <div>
+              <strong>Lançamentos (${budgetTxs.length})</strong>
+              ${budgetTxs.length === 0 ? `<div class="small" style="margin-top:10px; color:#666;">Sem lançamentos neste mês.</div>` : `
+              <ul class="list" style="margin-top:10px; max-height:250px; overflow-y:auto; padding-right:5px; border:1px solid #eee; border-radius:4px;">
+                  ${budgetTxs.slice(0, 50).map(t => `
+                      <li style="border-bottom:1px solid #eee; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                          <div style="flex:1; overflow:hidden;">
+                              <div style="font-size:0.9em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(t.description)}">${esc(t.description)}</div>
+                              <div style="font-size:0.8em; color:#888;">${t.date ? t.date.slice(8, 10) + '/' + t.date.slice(5, 7) : ''} ${t.tags && t.tags.length ? ` · [${esc(t.tags.join(', '))}]` : ''}</div>
+                          </div>
+                          <strong style="margin-left:10px; font-size:0.95em;">R$ ${(t.valueBRL || t.value).toFixed(2)}</strong>
+                      </li>
+                  `).join("")}
+                  ${budgetTxs.length > 50 ? `<li style="text-align:center; padding:10px; font-size:0.8em; color:#666;">Exibindo os últimos 50 de ${budgetTxs.length}</li>` : ''}
+              </ul>
+              `}
+          </div>
+      `;
+
+    contentEl.querySelector("#budgetModalMonth").addEventListener("change", (e) => {
+      currentMonth = e.target.value;
+      renderContent();
+    });
+
+    contentEl.querySelector("#btnBudgetOverride").onclick = async () => {
+      const val = prompt(`Qual o limite de gastos SOMENTE para o mês ${currentMonth}? (ex: 800.00)`, target > 0 ? target.toFixed(2) : "");
+      if (val === null) return;
+      const num = parseFloat(val.replace(",", "."));
+      if (isNaN(num)) return alert("Valor numérico inválido.");
+
+      const overrides = await list("budget_overrides");
+      const existing = overrides.find(o => o.templateId === tmplId && o.month === currentMonth);
+
+      await put("budget_overrides", {
+        id: existing ? existing.id : uid("bo"),
+        templateId: tmplId,
+        month: currentMonth,
+        targetCents: Math.round(num * 100),
+        createdAt: existing ? existing.createdAt : new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      renderContent();
+    };
+
+    contentEl.querySelector("#btnBudgetCopy").onclick = async () => {
+      const text = `Orçamento ${currentMonth} — ${tmpl.name}\nMeta: R$ ${target.toFixed(2)}\nGasto: R$ ${spent.toFixed(2)}\n${remaining < 0 ? 'Excedeu' : 'Restante'}: R$ ${Math.abs(remaining).toFixed(2)}\n%: ${pct.toFixed(0)}%`;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // Fallback for insecure contexts (like some local testing)
+          let textArea = document.createElement("textarea");
+          textArea.value = text;
+          textArea.style.position = "fixed";
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+        }
+        const btn = contentEl.querySelector("#btnBudgetCopy");
+        btn.innerText = "✅ Copiado!";
+        setTimeout(() => btn.innerText = "📋 Copiar Resumo", 2000);
+      } catch (err) {
+        alert("Erro ao copiar. Texto:\n\n" + text);
+      }
+    };
+  }
+
+  await renderContent();
 }

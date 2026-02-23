@@ -1,4 +1,4 @@
-import { list, put, remove, uid, get, deleteTransaction } from "../db.js";
+import { list, put, remove, uid, get, deleteTransaction, listByIndex } from "../db.js";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
@@ -62,7 +62,7 @@ export async function billsScreen() {
         }
 
         // Safe loading (Hardening D1)
-        const [templates, plans, categories, subcategories, people, accounts, cards, allBills, settingsList, tags] = await Promise.all([
+        const [templates, plans, categories, subcategories, people, accounts, cards, settingsList, tags] = await Promise.all([
             list("bill_templates").catch(e => []),
             list("bill_plans").catch(e => []),
             list("categories").catch(e => []),
@@ -70,19 +70,33 @@ export async function billsScreen() {
             list("people").catch(e => []),
             list("accounts").catch(e => []),
             list("cards").catch(e => []),
-            list("bills").catch(e => []),
             list("settings").catch(e => []),
             list("tags").catch(e => [])
         ]);
+
+        let allBills = [];
+        let bills = [];
+
+        // Optimize List: Se 'Ver Futuro' estiver ativo carregamos o histórico, senão indexamos por mês
+        if (_state.showUpcoming) {
+            allBills = await list("bills").catch(e => []);
+            bills = allBills.filter(b => b.month === currentMonth);
+        } else {
+            const idxRes = await listByIndex("bills", "by_month", currentMonth).catch(e => null);
+            if (idxRes === null) { // Fallback if index not ready
+                allBills = await list("bills").catch(e => []);
+                bills = allBills.filter(b => b.month === currentMonth);
+            } else {
+                bills = idxRes;
+                allBills = [...bills]; // Mock reference for safe fallback
+            }
+        }
 
         // Restore filters if available
         const savedFilters = settingsList.find(s => s.id === "ui_bills_filters");
         if (savedFilters && savedFilters.value) {
             _filters = { ..._filters, ...savedFilters.value };
         }
-
-        // 1. Filter by Month
-        let bills = allBills.filter(b => b.month === currentMonth);
 
         // HARDENING 1: Consistência de Status e Campos
         let mutatedCount = 0;

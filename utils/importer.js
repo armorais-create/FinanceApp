@@ -17,7 +17,19 @@ import { list } from "../db.js";
  * @property {boolean} selected
  * @property {string[]} warnings
  * @property {Object} raw
+ * @property {string} rawName
+ * @property {string} rawMemo
  */
+
+function normalizeEncoding(str) {
+    if (!str) return "";
+    try {
+        // Tenta corrigir strings que vieram como ISO-8859-1 mas foram lidas como UTF-8 (ex: SÃ£o Paulo)
+        return decodeURIComponent(escape(str));
+    } catch (e) {
+        return str; // Fallback se já for UTF-8 válido que quebra no escape
+    }
+}
 
 function normalizeDate(dateStr) {
     if (!dateStr) return null;
@@ -294,7 +306,7 @@ const Adapters = {
         }
     },
 
-    ofx: async (file) => {
+    ofx: async (file, options = {}) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -333,18 +345,24 @@ const Adapters = {
                             }
 
                             const rawAmount = parseFloat(trnMatch[1].trim());
-                            const fitid = fitMatch ? fitMatch[1].trim() : `ofx-${Date.now()}-${Math.random()}`;
+                            // Extract Memo and Name and correct encoding
+                            const rawMemo = memoMatch ? normalizeEncoding(memoMatch[1].trim()) : "";
+                            const rawName = nameMatch ? normalizeEncoding(nameMatch[1].trim()) : "";
 
-                            // Prefer MEMO if available, then NAME
-                            const memo = memoMatch ? memoMatch[1].trim() : "";
-                            const name = nameMatch ? nameMatch[1].trim() : "";
-                            const desc = memo || name || "Extrato OFX";
+                            // Let the default description be MEMO fallback to NAME
+                            const desc = rawMemo || rawName || "Extrato OFX";
+
+                            // Deterministic hash if no FITID, including accountId if passed
+                            const accountIdChunk = options.accountId ? `-acct-${options.accountId}` : "";
+                            const fitid = fitMatch ? fitMatch[1].trim() : `ofx-hash-${dateISO}-${rawAmount}-${desc}${accountIdChunk}`.replace(/\s+/g, '-').substring(0, 100);
 
                             if (dateISO && !isNaN(rawAmount)) {
                                 rows.push({
                                     id: `ofx-${i}-${Date.now()}`,
                                     dateISO,
                                     description: desc,
+                                    rawName, // Keep original available
+                                    rawMemo, // Keep original available
                                     amount: rawAmount, // Keep sign!
                                     currency: defaultCurrency,
                                     fitid: fitid,
@@ -367,7 +385,7 @@ const Adapters = {
         });
     },
 
-    qif: async (file) => {
+    qif: async (file, options = {}) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -391,12 +409,15 @@ const Adapters = {
                             if (isParsingTx && currentDate) {
                                 const desc = currentMemo || currentPayee || "Extrato QIF";
                                 // Hash if no FITID
-                                const pseudoHash = `qif-${currentDate}-${currentAmount}-${desc}`.replace(/\s+/g, '-');
+                                const accountIdChunk = options.accountId ? `-acct-${options.accountId}` : "";
+                                const pseudoHash = `qif-hash-${currentDate}-${currentAmount}-${desc}${accountIdChunk}`.replace(/\s+/g, '-').substring(0, 100);
 
                                 rows.push({
                                     id: `qif-${index}-${Date.now()}`,
                                     dateISO: currentDate,
                                     description: desc,
+                                    rawName: currentPayee,
+                                    rawMemo: currentMemo,
                                     amount: currentAmount,
                                     currency: "BRL", // QIF rarely has currency inline reliably
                                     fitid: pseudoHash,
@@ -428,10 +449,10 @@ const Adapters = {
                                 if (isNaN(currentAmount)) currentAmount = 0;
                                 isParsingTx = true;
                             } else if (type === 'P') {
-                                currentPayee = val;
+                                currentPayee = normalizeEncoding(val);
                                 isParsingTx = true;
                             } else if (type === 'M') {
-                                currentMemo = val;
+                                currentMemo = normalizeEncoding(val);
                                 isParsingTx = true;
                             }
                         }
@@ -452,15 +473,15 @@ const Adapters = {
 // =========================================
 
 export const importer = {
-    async parseFile(file, password = "") {
+    async parseFile(file, options = {}) {
         const ext = file.name.split(".").pop().toLowerCase();
         let rows = [];
 
-        if (ext === "csv") rows = await Adapters.csv(file);
-        else if (ext === "xlsx" || ext === "xls") rows = await Adapters.xlsx(file);
-        else if (ext === "pdf") rows = await Adapters.pdf(file, password);
-        else if (ext === "ofx") rows = await Adapters.ofx(file);
-        else if (ext === "qif") rows = await Adapters.qif(file);
+        if (ext === "csv") rows = await Adapters.csv(file, options);
+        else if (ext === "xlsx" || ext === "xls") rows = await Adapters.xlsx(file, options);
+        else if (ext === "pdf") rows = await Adapters.pdf(file, options.password);
+        else if (ext === "ofx") rows = await Adapters.ofx(file, options);
+        else if (ext === "qif") rows = await Adapters.qif(file, options);
         else throw new Error("Formato não suportado: " + ext);
 
         // Deduplication Check
@@ -470,9 +491,10 @@ export const importer = {
         const fitidLookup = new Set();
 
         existingTxs.forEach(tx => {
+            if (!tx) return;
             const key = `${tx.date}|${tx.value}`;
             if (!lookup.has(key)) lookup.set(key, []);
-            lookup.get(key).push(tx.description.toLowerCase());
+            lookup.get(key).push((tx.description || "").toLowerCase());
 
             if (tx.importId) {
                 fitidLookup.add(tx.importId);
@@ -483,7 +505,7 @@ export const importer = {
             // Check deterministic FITID (OFX/QIF)
             if (row.fitid && fitidLookup.has(row.fitid)) {
                 row.warnings.push("Duplicada exata: (ID do Extrato já importado)");
-                // We don't automatically deselect here so the user can see it, but we could!
+                row.selected = false; // By default, deselect duplicates!
             } else {
                 // Fallback heuristic deduplication for CSV/PDF
                 const key = `${row.dateISO}|${row.amount}`;

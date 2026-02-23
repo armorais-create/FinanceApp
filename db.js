@@ -1,6 +1,7 @@
-// db.js — banco local no navegador (IndexedDB)
+import { getCache, setCache, clearCache } from "./utils/cache.js";
+
 const DB_NAME = "financeapp";
-const DB_VERSION = 24; // INCREMENTED for Phase 17A-2 (Checklist do Mês)
+const DB_VERSION = 27; // INCREMENTED for Phase 20B-2 (DB Indexes Performance)
 const SUPPORTED_BACKUP_VERSION = 1;
 
 // Helper to validate legacy dumps
@@ -37,11 +38,12 @@ const STORES = [
     "bill_plans",
     "bills",
     "loans",
-    "loan_payments",
     "loan_installments",
     "person_balances",
     "balance_events",
-    "month_checklist"
+    "month_checklist",
+    "budget_templates",
+    "budget_overrides"
 ];
 
 function openDB() {
@@ -62,6 +64,11 @@ function openDB() {
                         s.createIndex("invoice_idx", ["cardId", "invoiceMonth"], { unique: false });
                         s.createIndex("import_session_idx", "import_session_id", { unique: false });
                         s.createIndex("by_planId", "installmentPlanId", { unique: false });
+                        s.createIndex("by_dateMonth", "dateMonth", { unique: false });
+                        s.createIndex("by_account_month", ["accountId", "dateMonth"], { unique: false });
+                        s.createIndex("by_person_month", ["personId", "dateMonth"], { unique: false });
+                        s.createIndex("by_category_month", ["categoryId", "dateMonth"], { unique: false });
+                        s.createIndex("by_invoiceMonth", "invoiceMonth", { unique: false });
                     }
                 } else if (storeName === "transactions") {
                     const s = tx.objectStore("transactions");
@@ -74,6 +81,26 @@ function openDB() {
                     if (!s.indexNames.contains("by_planId")) {
                         console.log("[DB Upgrade] Creating index: by_planId");
                         s.createIndex("by_planId", "installmentPlanId", { unique: false });
+                    }
+                    if (!s.indexNames.contains("by_dateMonth")) {
+                        console.log("[DB Upgrade] Creating index: by_dateMonth");
+                        s.createIndex("by_dateMonth", "dateMonth", { unique: false });
+                    }
+                    if (!s.indexNames.contains("by_account_month")) {
+                        console.log("[DB Upgrade] Creating index: by_account_month");
+                        s.createIndex("by_account_month", ["accountId", "dateMonth"], { unique: false });
+                    }
+                    if (!s.indexNames.contains("by_person_month")) {
+                        console.log("[DB Upgrade] Creating index: by_person_month");
+                        s.createIndex("by_person_month", ["personId", "dateMonth"], { unique: false });
+                    }
+                    if (!s.indexNames.contains("by_category_month")) {
+                        console.log("[DB Upgrade] Creating index: by_category_month");
+                        s.createIndex("by_category_month", ["categoryId", "dateMonth"], { unique: false });
+                    }
+                    if (!s.indexNames.contains("by_invoiceMonth")) {
+                        console.log("[DB Upgrade] Creating index: by_invoiceMonth");
+                        s.createIndex("by_invoiceMonth", "invoiceMonth", { unique: false });
                     }
                 }
             });
@@ -160,11 +187,21 @@ function openDB() {
                 s.createIndex("by_month", "month", { unique: false });
                 s.createIndex("by_template", "templateId", { unique: false });
                 s.createIndex("by_plan", "planId", { unique: false });
+                s.createIndex("by_template_month", ["templateId", "month"], { unique: false });
+                s.createIndex("by_status_month", ["status", "month"], { unique: false });
             } else {
                 const s = tx.objectStore("bills");
                 if (!s.indexNames.contains("by_plan")) {
                     console.log("[DB Upgrade] Creating index: by_plan on bills");
                     s.createIndex("by_plan", "planId", { unique: false });
+                }
+                if (!s.indexNames.contains("by_template_month")) {
+                    console.log("[DB Upgrade] Creating index: by_template_month on bills");
+                    s.createIndex("by_template_month", ["templateId", "month"], { unique: false });
+                }
+                if (!s.indexNames.contains("by_status_month")) {
+                    console.log("[DB Upgrade] Creating index: by_status_month on bills");
+                    s.createIndex("by_status_month", ["status", "month"], { unique: false });
                 }
             }
 
@@ -188,6 +225,18 @@ function openDB() {
                 const s = db.createObjectStore("loan_installments", { keyPath: "id" });
                 s.createIndex("by_loanId", "loanId", { unique: false });
                 s.createIndex("by_status", "status", { unique: false });
+                s.createIndex("by_dueMonth", "dueMonth", { unique: false });
+                s.createIndex("by_status_dueMonth", ["status", "dueMonth"], { unique: false });
+            } else {
+                const s = tx.objectStore("loan_installments");
+                if (!s.indexNames.contains("by_dueMonth")) {
+                    console.log("[DB Upgrade] Creating index: by_dueMonth on loan_installments");
+                    s.createIndex("by_dueMonth", "dueMonth", { unique: false });
+                }
+                if (!s.indexNames.contains("by_status_dueMonth")) {
+                    console.log("[DB Upgrade] Creating index: by_status_dueMonth on loan_installments");
+                    s.createIndex("by_status_dueMonth", ["status", "dueMonth"], { unique: false });
+                }
             }
 
             if (!db.objectStoreNames.contains("person_balances")) {
@@ -199,6 +248,19 @@ function openDB() {
                 console.log("[DB Upgrade] Creating store: balance_events");
                 const s = db.createObjectStore("balance_events", { keyPath: "id" });
                 s.createIndex("by_person", "personId", { unique: false });
+                s.createIndex("by_month", "month", { unique: false });
+            }
+
+            // Monthly Budgets
+            if (!db.objectStoreNames.contains("budget_templates")) {
+                console.log("[DB Upgrade] Creating store: budget_templates");
+                db.createObjectStore("budget_templates", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("budget_overrides")) {
+                console.log("[DB Upgrade] Creating store: budget_overrides");
+                const s = db.createObjectStore("budget_overrides", { keyPath: "id" });
+                s.createIndex("by_template", "templateId", { unique: false });
                 s.createIndex("by_month", "month", { unique: false });
             }
         };
@@ -220,12 +282,21 @@ export function uid(prefix) {
 }
 
 export async function list(storeName) {
+    // 20B-1: Memcache for fast reads
+    const cacheKey = `list_${storeName}`;
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
     const db = await openDB();
     return new Promise((resolve, reject) => {
         try {
             const store = tx(db, storeName);
             const req = store.getAll();
-            req.onsuccess = () => resolve(req.result || []);
+            req.onsuccess = () => {
+                const res = req.result || [];
+                setCache(cacheKey, res); // Cache the result
+                resolve(res);
+            };
             req.onerror = () => reject(req.error);
         } catch (e) { reject(e); }
     });
@@ -244,12 +315,23 @@ export async function get(storeName, id) {
 }
 
 export async function put(storeName, obj) {
+    if (storeName === "transactions") {
+        const d = obj.date || new Date().toISOString().slice(0, 10);
+        obj.dateMonth = d.slice(0, 7);
+    } else if (storeName === "loan_installments") {
+        const d = obj.dueDate || new Date().toISOString().slice(0, 10);
+        obj.dueMonth = d.slice(0, 7);
+    }
+
     const db = await openDB();
     return new Promise((resolve, reject) => {
         try {
             const store = tx(db, storeName, "readwrite");
             const req = store.put(obj);
-            req.onsuccess = () => resolve(true);
+            req.onsuccess = () => {
+                clearCache();
+                resolve(true);
+            };
             req.onerror = () => reject(req.error);
         } catch (e) { reject(e); }
     });
@@ -262,7 +344,10 @@ export async function remove(storeName, id) {
         try {
             const store = tx(db, storeName, "readwrite");
             const req = store.delete(id);
-            req.onsuccess = () => resolve(true);
+            req.onsuccess = () => {
+                clearCache();
+                resolve(true);
+            };
             req.onerror = () => reject(req.error);
         } catch (e) { reject(e); }
     });
@@ -279,8 +364,14 @@ export async function updateTransaction(id, patch) {
                 if (!data) return resolve(false); // Not found
 
                 const updated = { ...data, ...patch };
+                const d = updated.date || new Date().toISOString().slice(0, 10);
+                updated.dateMonth = d.slice(0, 7);
+
                 const reqPut = store.put(updated);
-                reqPut.onsuccess = () => resolve(updated);
+                reqPut.onsuccess = () => {
+                    clearCache();
+                    resolve(updated);
+                };
                 reqPut.onerror = () => reject(reqPut.error);
             };
             req.onerror = () => reject(req.error);
@@ -317,7 +408,10 @@ export async function deleteInvoice(cardId, invoiceMonth) {
                 }
             };
 
-            t.oncomplete = () => resolve(deletedCount);
+            t.oncomplete = () => {
+                clearCache();
+                resolve(deletedCount);
+            };
             t.onerror = () => reject(t.error);
         } catch (e) { reject(e); }
     });
@@ -372,7 +466,10 @@ export async function clearDB() {
     const t = db.transaction(existingStores, "readwrite");
     existingStores.forEach(name => t.objectStore(name).clear());
     return new Promise((resolve, reject) => {
-        t.oncomplete = () => resolve(true);
+        t.oncomplete = () => {
+            clearCache();
+            resolve(true);
+        };
         t.onerror = () => reject(t.error);
     });
 }
@@ -425,7 +522,10 @@ export async function importDB(backupData, replace = true) {
     const t = db.transaction(existingStores, "readwrite");
 
     return new Promise((resolve, reject) => {
-        t.oncomplete = () => resolve(true);
+        t.oncomplete = () => {
+            clearCache();
+            resolve(true);
+        };
         t.onerror = () => reject(t.error);
         t.onabort = () => reject(new Error("Falha ao importar: seus dados atuais não foram alterados. Tente novamente com um backup válido."));
 
@@ -436,7 +536,17 @@ export async function importDB(backupData, replace = true) {
 
                 const items = dataMap[name];
                 if (Array.isArray(items)) {
-                    items.forEach(item => store.put(item));
+                    items.forEach(item => {
+                        // Import Hooks for derived indices
+                        if (name === "transactions") {
+                            const d = item.date || new Date().toISOString().slice(0, 10);
+                            item.dateMonth = d.slice(0, 7);
+                        } else if (name === "loan_installments") {
+                            const d = item.dueDate || new Date().toISOString().slice(0, 10);
+                            item.dueMonth = d.slice(0, 7);
+                        }
+                        store.put(item);
+                    });
                 }
             });
         } catch (e) {
@@ -444,6 +554,103 @@ export async function importDB(backupData, replace = true) {
             reject(e);
         }
     });
+}
+
+// ----------------------------------------------------
+// PHASE 20B-2 DB OPTIMIZATIONS
+// ----------------------------------------------------
+
+export async function listByIndex(storeName, indexName, key) {
+    // Memcache for indexes
+    const cacheKey = `listIdx_${storeName}_${indexName}_${key}`;
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        try {
+            const store = tx(db, storeName);
+            if (!store.indexNames.contains(indexName)) {
+                console.warn(`[DB] Index ${indexName} not found on ${storeName}. Fallback triggered.`);
+                return resolve(null); // Signal fallback to array filter
+            }
+
+            const index = store.index(indexName);
+            const req = index.getAll(IDBKeyRange.only(key));
+
+            req.onsuccess = () => {
+                const res = req.result || [];
+                setCache(cacheKey, res);
+                resolve(res);
+            };
+            req.onerror = () => {
+                console.error(`[DB] Error resolving index ${indexName}:`, req.error);
+                resolve(null); // Fallback
+            };
+        } catch (e) {
+            console.error(`[DB] Exception reading index ${indexName} on ${storeName}:`, e);
+            resolve(null); // Fallback
+        }
+    });
+}
+
+export async function runBackgroundMigrations() {
+    try {
+        const db = await openDB();
+        const storesToMigrate = [];
+        if (db.objectStoreNames.contains("transactions")) storesToMigrate.push("transactions");
+        if (db.objectStoreNames.contains("loan_installments")) storesToMigrate.push("loan_installments");
+
+        if (storesToMigrate.length === 0) return;
+
+        let mutated = false;
+        const t = db.transaction(storesToMigrate, "readwrite");
+
+        if (storesToMigrate.includes("transactions")) {
+            const reqTx = t.objectStore("transactions").openCursor();
+            reqTx.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    const txRec = cursor.value;
+                    if (!txRec.dateMonth && txRec.date) {
+                        txRec.dateMonth = txRec.date.slice(0, 7);
+                        cursor.update(txRec);
+                        mutated = true;
+                    }
+                    cursor.continue();
+                }
+            };
+        }
+
+        if (storesToMigrate.includes("loan_installments")) {
+            const reqLoan = t.objectStore("loan_installments").openCursor();
+            reqLoan.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    const lRec = cursor.value;
+                    if (!lRec.dueMonth && lRec.dueDate) {
+                        lRec.dueMonth = lRec.dueDate.slice(0, 7);
+                        cursor.update(lRec);
+                        mutated = true;
+                    }
+                    cursor.continue();
+                }
+            };
+        }
+
+        t.oncomplete = () => {
+            if (mutated) {
+                console.log("[DB] Background schema patch applied successfully (dateMonth / dueMonth).");
+                clearCache();
+            }
+        };
+        t.onerror = (e) => {
+            console.warn("[DB] Background migration failed or aborted", e);
+        };
+
+    } catch (err) {
+        console.error("[DB] Background Migration Caught Exception", err);
+    }
 }
 
 

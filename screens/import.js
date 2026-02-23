@@ -18,6 +18,39 @@ function normalizeStr(s) {
         .trim();
 }
 
+async function applyRulesToStateRows() {
+    console.log(`[IMPORT] Applying rules...`);
+    const rules = await list("rules");
+    const subcategories = await list("subcategories");
+
+    const ruleResults = applyRulesToMany(state.rows, rules, subcategories);
+
+    state.rows = ruleResults.map(res => {
+        const r = res.draftTx; // Modified draft
+        r.appliedRules = res.appliedRuleIds;
+
+        if (r.appliedRules && r.appliedRules.length > 0) {
+            r.confidence = 'alta';
+        } else {
+            const norm = normalizeStr(r.description);
+            const histMatch = state.cache.historyMap[norm];
+            if (histMatch && histMatch.categoryId) {
+                r.confidence = 'media';
+                r.categoryId = histMatch.categoryId || r.categoryId;
+                r.subcategoryId = histMatch.subcategoryId || r.subcategoryId;
+                r.cardType = histMatch.cardType || r.cardType;
+                r.payerRole = histMatch.payerRole || r.payerRole;
+                r.personId = histMatch.personId || r.personId;
+                r.tags = histMatch.tags || r.tags;
+            } else {
+                r.confidence = 'baixa';
+            }
+        }
+        return r;
+    });
+    console.log(`[IMPORT] Rules applied. Rows with rules: ${state.rows.filter(r => r.appliedRules?.length).length}`);
+}
+
 /* =========================================
    STATE MANAGEMENT
    ========================================= */
@@ -33,7 +66,9 @@ const state = {
         cardId: "",
         accountId: "",
         invoiceMonth: new Date().toISOString().slice(0, 7), // YYYY-MM
-        cardHolder: "main" // Titular or Additional
+        cardHolder: "main", // Titular or Additional
+        descFallback: "memo", // "memo" | "name" | "both"
+        relaxedDedup: false
     },
 
     // Cache for dropdowns
@@ -255,7 +290,9 @@ function renderStep1(cnt) {
             // Processing in next tick to allow UI to update
             setTimeout(async () => {
                 try {
-                    const result = await importer.parseFile(state.file);
+                    const result = await importer.parseFile(state.file, {
+                        accountId: state.dest.importType === "account" ? state.dest.accountId : null
+                    });
 
                     console.log(`[IMPORT][CSV] Parsed rows length: ${result.rows.length}`);
                     if (result.rows.length === 0) {
@@ -263,62 +300,39 @@ function renderStep1(cnt) {
                     }
 
                     // Map to internal state rows
-                    state.rows = result.rows.map(r => ({
-                        id: r.id,
-                        date: r.dateISO, // Map dateISO -> date
-                        description: r.description,
-                        value: r.amount, // Map amount -> value
-                        currency: r.currency || "BRL",
-                        fitid: r.fitid || "", // For OFX/QIF deduplication
-                        categoryId: r.categoryId || "",
-                        subcategoryId: r.subcategoryId || "",
-
-                        cardType: r.cardUsageType || "fisico", // 'fisico' | 'virtual'
-                        payerRole: r.payerRole || "main",      // 'main' | 'additional'
-
-                        selected: r.selected !== false,
-                        warnings: r.warnings || [],
-                        raw: r.raw
-                    }));
-
-                    // --- APPLY RULES (Block 9B) ---
-                    console.log(`[IMPORT] Applying rules...`);
-                    const rules = await list("rules");
-
-                    // We only apply rules to rows. applyRulesToMany returns { draftTx, appliedRuleIds }
-                    // We need to map back to state.rows structure
-                    const subcategories = await list("subcategories");
-
-                    const ruleResults = applyRulesToMany(state.rows, rules, subcategories);
-
-                    state.rows = ruleResults.map(res => {
-                        const r = res.draftTx; // Modified draft
-                        // Add metadata for UI
-                        r.appliedRules = res.appliedRuleIds;
-
-                        // Phase 16A-1: Confidence Level & ML Suggestion
-                        if (r.appliedRules && r.appliedRules.length > 0) {
-                            r.confidence = 'alta';
-                        } else {
-                            const norm = normalizeStr(r.description);
-                            const histMatch = state.cache.historyMap[norm];
-                            if (histMatch && histMatch.categoryId) {
-                                r.confidence = 'media';
-                                r.categoryId = histMatch.categoryId || r.categoryId;
-                                r.subcategoryId = histMatch.subcategoryId || r.subcategoryId;
-                                r.cardType = histMatch.cardType || r.cardType;
-                                r.payerRole = histMatch.payerRole || r.payerRole;
-                                r.personId = histMatch.personId || r.personId;
-                                r.tags = histMatch.tags || r.tags;
-                            } else {
-                                r.confidence = 'baixa';
-                            }
+                    state.rows = result.rows.map(r => {
+                        let desc = r.description;
+                        // Use raw text for initial description setup based on fallback preferences (only OFX/QIF have rawName/Memo)
+                        if (state.dest.importType === "account" && r.rawMemo !== undefined) {
+                            if (state.dest.descFallback === "name") desc = r.rawName || r.rawMemo || "Extrato OFX";
+                            else if (state.dest.descFallback === "both") desc = [r.rawName, r.rawMemo].filter(Boolean).join(" - ") || "Extrato OFX";
+                            else desc = r.rawMemo || r.rawName || "Extrato OFX";
                         }
 
-                        return r;
+                        return {
+                            id: r.id,
+                            date: r.dateISO, // Map dateISO -> date
+                            description: desc,
+                            rawName: r.rawName,
+                            rawMemo: r.rawMemo,
+                            value: r.amount, // Map amount -> value
+                            currency: r.currency || "BRL",
+                            fitid: r.fitid || "", // For OFX/QIF deduplication
+                            categoryId: r.categoryId || "",
+                            subcategoryId: r.subcategoryId || "",
+
+                            cardType: r.cardUsageType || "fisico", // 'fisico' | 'virtual'
+                            payerRole: r.payerRole || "main",      // 'main' | 'additional'
+                            accountId: state.dest.importType === "account" ? state.dest.accountId : "",
+
+                            selected: r.selected !== false,
+                            warnings: r.warnings || [],
+                            raw: r.raw
+                        };
                     });
 
-                    console.log(`[IMPORT] Rules applied. Rows with rules: ${state.rows.filter(r => r.appliedRules?.length).length}`);
+                    // --- APPLY RULES (Block 9B) ---
+                    await applyRulesToStateRows();
                     // ------------------------------
 
                     state.step = 2;
@@ -368,6 +382,21 @@ function renderStep2(cnt) {
                 <label><input type="checkbox" id="chkAll" checked> Selecionar Todos</label>
              </div>
         </div>
+        
+        ${state.dest.importType === 'account' ? `
+        <div class="form grid" style="background:#f9f9f9; border:1px solid #ddd; padding:10px; margin-top:10px; border-radius:4px;">
+            <label style="font-weight:bold; font-size: 13px;">Descrição Padrão:
+                <select id="selDescFallback" style="padding: 4px; border: 1px solid #ccc; width: auto;">
+                    <option value="memo" ${state.dest.descFallback === 'memo' ? 'selected' : ''}>MEMO (Padrão)</option>
+                    <option value="name" ${state.dest.descFallback === 'name' ? 'selected' : ''}>NAME</option>
+                    <option value="both" ${state.dest.descFallback === 'both' ? 'selected' : ''}>Combinar (NAME - MEMO)</option>
+                </select>
+            </label>
+            <label style="font-weight:normal; font-size: 13px; color:#555; display:flex; align-items:center; gap:5px;">
+                <input type="checkbox" id="chkRelaxedDedup" ${state.dest.relaxedDedup ? 'checked' : ''}>
+                <span>Considerar deduplicação relaxada (Avisar/Ignorar duplicatas por <b>Data+Valor</b> ignorando diferenças na descrição)</span>
+            </label>
+        </div>` : ''}
 
         <div id="tableContainer" style="max-height:500px; overflow:auto; border:1px solid #ddd; margin-top:10px; position:relative;">
              <table style="width:100%; border-collapse:collapse; font-size:12px; min-width:900px;">
@@ -462,7 +491,7 @@ function renderStep2(cnt) {
                 <td><input type="date" class="rowDate smallInput" data-idx="${i}" value="${r.date || ''}" style="width:100%"></td>
                 <td>
                     <input type="text" class="rowDesc smallInput" data-idx="${i}" value="${esc(r.description)}" style="width:100%">
-                    ${autoBadge}
+                    <div style="margin-top:2px;">${autoBadge} ${r.appliedRules && r.appliedRules.length ? `<span style="font-size:10px; color:#555;">(Regra aplicada)</span>` : ''}</div>
                 </td>
                 <td><input type="number" step="0.01" class="rowVal smallInput" data-idx="${i}" value="${r.value}" style="width:100%"></td>
                 
@@ -559,6 +588,33 @@ function renderStep2(cnt) {
         if (el.classList.contains("rowType")) row.cardType = el.value;
         if (el.classList.contains("rowPay")) row.payerRole = el.value;
     });
+
+    // Custom controls
+    const selDescFallback = cnt.querySelector("#selDescFallback");
+    if (selDescFallback) {
+        selDescFallback.onchange = (e) => {
+            state.dest.descFallback = e.target.value;
+            cnt.querySelector("#loadingIndicator").style.display = "block";
+            setTimeout(async () => {
+                state.rows.forEach(r => {
+                    if (r.rawMemo !== undefined) {
+                        if (state.dest.descFallback === "name") r.description = r.rawName || r.rawMemo || "Extrato OFX";
+                        else if (state.dest.descFallback === "both") r.description = [r.rawName, r.rawMemo].filter(Boolean).join(" - ") || "Extrato OFX";
+                        else r.description = r.rawMemo || r.rawName || "Extrato OFX";
+                    }
+                });
+                await applyRulesToStateRows();
+                renderDispatcher(cnt);
+            }, 50);
+        };
+    }
+
+    const chkRelaxedDedup = cnt.querySelector("#chkRelaxedDedup");
+    if (chkRelaxedDedup) {
+        chkRelaxedDedup.onchange = (e) => {
+            state.dest.relaxedDedup = e.target.checked;
+        };
+    }
 
     // Styles
     const style = document.createElement("style");
@@ -1136,6 +1192,24 @@ async function startImportProcess(cnt) {
     const selected = state.rows.filter(r => r.selected);
     const total = selected.length;
     let processed = 0;
+    let ignoredCount = 0;
+
+    // Deduplication Set for Accounts
+    const importIdSet = new Set();
+    const relaxedDedupSet = new Set();
+    if (state.dest.importType === "account") {
+        const existingTx = await list("transactions");
+        existingTx.forEach(tx => {
+            if (tx.accountId === state.dest.accountId) {
+                if (tx.importId) {
+                    importIdSet.add(tx.importId);
+                }
+                if (state.dest.relaxedDedup && tx.date && tx.value !== undefined) {
+                    relaxedDedupSet.add(`${tx.date}|${tx.value}`);
+                }
+            }
+        });
+    }
 
     // Config needed for fallback fx rates
     let usdRateGlob = 5.0;
@@ -1199,16 +1273,45 @@ async function startImportProcess(cnt) {
                 };
             } else {
                 // Account Export Structure (OFX/QIF)
+                const importIdBase = row.fitid || undefined;
+                const finalImportId = importIdBase ? `${importIdBase}-acct-${state.dest.accountId}` : undefined;
+
+                let isDuplicate = false;
+                if (finalImportId && importIdSet.has(finalImportId)) {
+                    isDuplicate = true;
+                } else if (state.dest.relaxedDedup) {
+                    const rowDateKey = row.dateISO || row.date;
+                    const rowValKey = row.amount !== undefined ? row.amount : row.value;
+                    const relaxedKey = `${rowDateKey}|${rowValKey}`;
+                    if (relaxedDedupSet.has(relaxedKey)) {
+                        isDuplicate = true;
+                    }
+                }
+
+                if (isDuplicate) {
+                    ignoredCount++;
+                    return; // Skip duplicate mapping
+                }
+
+                if (finalImportId) importIdSet.add(finalImportId); // Add locally too
+                if (state.dest.relaxedDedup) {
+                    const rowDateKey = row.dateISO || row.date;
+                    const rowValKey = row.amount !== undefined ? row.amount : row.value;
+                    relaxedDedupSet.add(`${rowDateKey}|${rowValKey}`);
+                }
+
                 finalTx = {
                     ...commonProps,
                     type: isExpense ? "expense" : "revenue", // OFX/QIF positive equals revenue (or transfer, but revenue is safe default)
                     accountId: state.dest.accountId,
-                    importId: row.fitid || undefined, // For OFX fits or QIF pseudo-hashes
+                    importId: finalImportId, // For OFX fits or QIF pseudo-hashes
                     importSource: row.fitid ? (row.fitid.startsWith('qif-') ? "qif" : "ofx") : undefined
                 };
             }
 
-            await put("transactions", finalTx);
+            if (finalTx) {
+                await put("transactions", finalTx);
+            }
         }));
 
         processed += chunk.length;
@@ -1225,19 +1328,30 @@ async function startImportProcess(cnt) {
     progText.textContent = "Concluído!";
     finalMsg.style.display = "block";
 
+    let successHtml = `<div style="font-size:1.2em; color:green; margin-bottom:10px;">✅ Sucesso!</div>`;
+    if (ignoredCount > 0) {
+        successHtml += `<div style="font-size:0.9em; margin-bottom:10px; color:#555;">Importadas ${total - ignoredCount}; Duplicadas ${ignoredCount} (ignoradas)</div>`;
+    } else {
+        successHtml += `<div style="font-size:0.9em; margin-bottom:10px; color:#555;">Importadas ${total}</div>`;
+    }
+    successHtml += `<button id="btnFinish">Ver Faturas</button>`;
+    finalMsg.innerHTML = successHtml;
+
+    const newBtnFinish = cnt.querySelector("#btnFinish");
+
     if (state.dest.importType === "card") {
         // Update Invoice State (Circuit Breaker pattern - safe update)
         try {
             setInvoiceState(state.dest.cardId, state.dest.invoiceMonth);
         } catch (e) { console.warn("Invoice update warning", e); }
 
-        btnFinish.textContent = "Ver Faturas";
-        btnFinish.onclick = () => {
+        newBtnFinish.textContent = "Ver Faturas";
+        newBtnFinish.onclick = () => {
             location.hash = "#invoices";
         };
     } else {
-        btnFinish.textContent = "Ver Lançamentos";
-        btnFinish.onclick = () => {
+        newBtnFinish.textContent = "Ver Lançamentos";
+        newBtnFinish.onclick = () => {
             location.hash = "#tx";
         };
     }

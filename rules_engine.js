@@ -22,9 +22,16 @@ export function applyRulesToDraft(draftTx, rules, subcategories = []) {
 
     const appliedRuleIds = [];
 
+    // Local Helper to ensure robust description matching
+    const normalizeStr = (s) => (s || "").toString()
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // sem acentos
+        .replace(/\s+/g, " ") // espaços colapsados
+        .trim();
+
     // Work on a copy to avoid side effects if needed, but draftTx is usually mutable in this context.
     const tx = { ...draftTx };
-    const desc = (tx.description || "").toLowerCase();
+    const desc = normalizeStr(tx.description);
 
     for (const rule of activeRules) {
         if (!rule.match) continue;
@@ -48,14 +55,14 @@ export function applyRulesToDraft(draftTx, rules, subcategories = []) {
 
         // anyIncludes (OR)
         if (anyInc.length > 0) {
-            isMatch = anyInc.some(term => term && desc.includes(term.toLowerCase()));
+            isMatch = anyInc.some(term => term && desc.includes(normalizeStr(term)));
         }
 
         // allIncludes (AND)
         if (isMatch && rule.match.allIncludes) {
             let allInc = Array.isArray(rule.match.allIncludes) ? rule.match.allIncludes : rule.match.allIncludes.split(",").map(t => t.trim()).filter(Boolean);
             if (allInc.length > 0) {
-                isMatch = allInc.every(term => term && desc.includes(term.toLowerCase()));
+                isMatch = allInc.every(term => term && desc.includes(normalizeStr(term)));
             }
         }
 
@@ -63,7 +70,7 @@ export function applyRulesToDraft(draftTx, rules, subcategories = []) {
         if (isMatch && rule.match.noneIncludes) {
             let noneInc = Array.isArray(rule.match.noneIncludes) ? rule.match.noneIncludes : rule.match.noneIncludes.split(",").map(t => t.trim()).filter(Boolean);
             if (noneInc.length > 0) {
-                const hasForbidden = noneInc.some(term => term && desc.includes(term.toLowerCase()));
+                const hasForbidden = noneInc.some(term => term && desc.includes(normalizeStr(term)));
                 if (hasForbidden) isMatch = false;
             }
         }

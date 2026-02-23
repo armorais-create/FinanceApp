@@ -1,4 +1,5 @@
 import { list, get, put } from "../db.js";
+import { drawBarChart, exportChartToPNG } from "../utils/charts.js";
 
 /* =========================================
    STATE
@@ -265,8 +266,18 @@ async function renderReports(cnt) {
     `;
 
     cnt.innerHTML = `
-        <!-- FILTER BAR -->
-        <div class="card" style="background:#f8f9fa;">
+    <div id="reportsContainer" style="padding-bottom:80px; max-width:800px; margin:0 auto;">
+        
+        <!-- HEADER / FILTERS -->
+        <div class="card" style="box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:15px; position:sticky; top:60px; z-index:100;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0; font-size:16px;">Painel / Relatórios</h3>
+                <div style="display:flex; gap:5px;">
+                    <button id="btnViewDashboard" class="small ${state.filters.viewMode === 'dashboard' ? 'primary' : 'secondary'}">Dash</button>
+                    <button id="btnViewDetails" class="small ${state.filters.viewMode === 'details' ? 'primary' : 'secondary'}">Tabelas</button>
+                    <button onclick="location.hash='#charts-report'" class="small secondary" style="border-color:#17a2b8; color:#17a2b8;">PDF Gráfico</button>
+                </div>
+            </div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                 <input type="month" id="repMonth" value="${dateInputVal}" style="padding:5px;">
                 <button id="btnToday" style="padding:5px 10px;">Hoje</button>
@@ -379,6 +390,38 @@ async function renderReports(cnt) {
             renderBillsOverview(cnt, state.filters, month);
             renderLoansOverview(cnt, state.filters, month);
             renderRejaneView(cnt, state.cache.txs, state.filters, month);
+
+            // Draw Top Categories Chart (20A-1)
+            if (window.__reportsCharts && window.__reportsCharts.topCats) {
+                const canvas = cnt.querySelector("#reportsCategoryChart");
+                if (canvas) {
+                    const barHitboxes = drawBarChart(canvas, window.__reportsCharts.topCats);
+
+                    // 20A-2: Drill-down click
+                    canvas.onclick = (e) => {
+                        if (!barHitboxes) return;
+                        const pos = window.getCanvasClickPosition ? window.getCanvasClickPosition(canvas, e) : null;
+                        if (!pos) return;
+
+                        const hit = barHitboxes.find(h => pos.y >= h.y && pos.y <= h.y + h.h);
+                        if (hit && hit.data && hit.data.categoryId) {
+                            state.filters.quickFilter = {
+                                type: 'category',
+                                value: hit.data.categoryId,
+                                name: hit.data.label
+                            };
+                            refresh().then(() => {
+                                const el = cnt.querySelector("#divBillsOverview"); // rough scroll target in Details
+                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            });
+                        }
+                    };
+                    canvas.style.cursor = "pointer";
+
+                    const btn = cnt.querySelector("#btnExportTopCats");
+                    if (btn) btn.onclick = () => exportChartToPNG(canvas, `top_cats_${month}_${Date.now()}.png`);
+                }
+            }
         }, 0);
     }
 
@@ -750,44 +793,38 @@ function renderAccountTable(txs) {
    ========================================= */
 
 function renderTopCategories(txs) {
-    // Top 10 Expenses
     const groups = {};
-    let totalExp = 0;
     txs.forEach(t => {
         if (t.type !== 'expense') return;
         const v = t.valueBRL ?? t.value;
         const k = t.categoryId || "uncat";
         if (!groups[k]) groups[k] = 0;
         groups[k] += v;
-        totalExp += v;
     });
 
     const sorted = Object.keys(groups).sort((a, b) => groups[b] - groups[a]).slice(0, 10);
-    const maxVal = sorted.length ? groups[sorted[0]] : 1;
 
-    let html = `<div class="card">
-        <div style="font-weight:bold; margin-bottom:5px;">Top Categorias (Desp.)</div>`;
-
-    if (sorted.length === 0) html += "<div class='small'>Sem dados.</div>";
-
-    sorted.forEach(cid => {
-        const val = groups[cid];
+    // Prepare data for the Bar Chart
+    const chartData = sorted.map(cid => {
         const name = state.cache.categories.find(c => c.id === cid)?.name || "(Sem Categoria)";
-        const pctBar = (val / maxVal) * 100;
-
-        html += `
-            <div data-quick-filter data-type="category" data-val="${cid}" data-name="${esc(name)}" 
-                 style="margin-bottom:4px; font-size:11px; position:relative;">
-                <div style="display:flex; justify-content:space-between; position:relative; z-index:2; padding:0 2px;">
-                    <span>${esc(name)}</span>
-                    <span>${fmtBRL(val)}</span>
-                </div>
-                <div style="position:absolute; top:0; left:0; height:100%; width:${pctBar}%; background:rgba(220, 53, 69, 0.15); border-radius:2px; z-index:1;"></div>
-            </div>
-        `;
+        return { label: name, value: groups[cid], categoryId: cid };
     });
-    html += `</div>`;
-    return html;
+
+    // Store globally for post-render drawing
+    window.__reportsCharts = window.__reportsCharts || {};
+    window.__reportsCharts.topCats = chartData;
+
+    return `
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <strong style="font-size:14px;">Top Categorias (Desp.)</strong>
+            <button type="button" class="small secondary" id="btnExportTopCats" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
+        </div>
+        <div style="width:100%; overflow-x:auto;">
+            <canvas id="reportsCategoryChart" width="340" height="250" style="max-width:100%;"></canvas>
+        </div>
+    </div>
+    `;
 }
 
 function renderTopTags(txs) {

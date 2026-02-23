@@ -1,7 +1,7 @@
 // screens/search.js
 // Global Search and Filters Utilities
 
-import { list, put, get } from "../db.js";
+import { list, put, get, listByIndex } from "../db.js";
 
 export function normalize(str) {
     if (!str) return "";
@@ -214,8 +214,27 @@ export async function searchScreen() {
     // Coletar dados baseados nos escopos selecionados
     let unified = [];
 
+    const isMonthLimit = _screenState.periodMode === 'month' && _screenState.filterMonth;
+    const mo = _screenState.filterMonth;
+
     if (_screenState.scopeTx || _screenState.scopeCards) {
-        const txs = await list("transactions").catch(() => []);
+        let txs = [];
+        if (isMonthLimit) {
+            const byDate = await listByIndex("transactions", "by_dateMonth", mo).catch(() => null);
+            const byInv = await listByIndex("transactions", "by_invoiceMonth", mo).catch(() => null);
+
+            if (byDate && byInv) {
+                const map = new Map();
+                for (const t of byDate) map.set(t.id, t);
+                for (const t of byInv) map.set(t.id, t);
+                txs = Array.from(map.values());
+            } else {
+                txs = await list("transactions").catch(() => []);
+            }
+        } else {
+            txs = await list("transactions").catch(() => []);
+        }
+
         for (const t of txs) {
             // Se for fatura (tem cardId e invoiceMonth)
             const isCard = !!t.cardId && !!t.invoiceMonth;
@@ -245,21 +264,28 @@ export async function searchScreen() {
     }
 
     if (_screenState.scopeBills) {
-        const bills = await list("bills").catch(() => []);
+        let bills = [];
+        if (isMonthLimit) {
+            const bIdx = await listByIndex("bills", "by_month", mo).catch(() => null);
+            bills = bIdx || await list("bills").catch(() => []);
+        } else {
+            bills = await list("bills").catch(() => []);
+        }
+
         for (const b of bills) {
             unified.push({
                 type: 'CONTA A PAGAR',
                 rawType: 'bill',
                 id: b.id,
                 date: b.dueDate || (b.month + "-01"),
-                description: b.title || b.description,
+                description: b.title || b.description || b.name,
                 value: b.amount || 0,
                 isExpense: true, // Assuming bills are expenses
-                personId: '', // Usually bills don't have personId like Tx
+                personId: b.personId || '',
                 accountId: '',
                 cardId: '',
                 categoryId: b.categoryId,
-                subcategoryId: '',
+                subcategoryId: b.subcategoryId || '',
                 tags: b.tags || [],
                 status: b.paid ? 'paid' : (b.status || 'open'),
                 original: b,

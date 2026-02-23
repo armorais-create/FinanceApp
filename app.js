@@ -1,13 +1,15 @@
-import { list, put, remove } from "./db.js";
-import { settingsScreen, wireSettingsHandlers } from "./ui.js";
+import { list, put, remove, listByIndex, runBackgroundMigrations } from "./db.js";
+import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal } from "./ui.js?v=2.0";
+import { drawLineChart, drawGroupedBarChart, exportChartToPNG, getCanvasClickPosition } from "./utils/charts.js";
 import { txScreen, wireTxHandlers } from "./screens/tx.js";
 import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
 import { importScreen, wireImportHandlers } from "./screens/import.js";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
-import { billsScreen, wireBillsHandlers } from "./screens/bills.js?v=1.0";
+import { billsScreen, wireBillsHandlers } from "./screens/bills.js";
 import { loansScreen, wireLoansHandlers } from "./screens/loans.js";
 import { rejaneReportScreen, wireRejaneReportHandlers } from "./screens/rejaneReport.js";
+import { chartsReportScreen, wireChartsReportHandlers } from "./screens/chartsReport.js";
 import { searchScreen, wireSearchHandlers } from "./screens/search.js";
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
@@ -133,6 +135,8 @@ const screens = {
       const goals = await list("goal_templates"); // Recurrent Templates
       const revisions = await list("goal_revisions");
       const overrides = await list("goal_overrides");
+      const budgetTemplates = await list("budget_templates") || [];
+      const budgetOverrides = await list("budget_overrides") || [];
 
       // 1. Calculate Open Invoices
       const invoices = {};
@@ -216,6 +220,65 @@ const screens = {
 
       const hasGoals = goalProgress.length > 0;
 
+      // 3. Monthly Budgets Logic
+      const activeBudgets = budgetTemplates.filter(b => b.active);
+      const getBudgetTarget = (tmplId, month) => {
+        const ov = budgetOverrides.find(o => o.templateId === tmplId && o.month === month);
+        return ov ? ov.targetCents : (activeBudgets.find(b => b.id === tmplId)?.monthlyTargetCents || 0);
+      };
+
+      const budgetProgress = activeBudgets.map(b => {
+        const targetCents = getBudgetTarget(b.id, currentMonth);
+        if (targetCents <= 0) return null;
+
+        const budgetTxs = txs.filter(t => {
+          const txDate = t.date ? t.date.slice(0, 7) : "";
+          if (txDate !== currentMonth) return false;
+          if (t.type !== "expense") return false;
+
+          if (t.categoryId !== b.categoryId) return false;
+          if (b.subcategoryId && t.subcategory !== b.subcategoryId) return false;
+          if (b.personId && t.personId !== b.personId) return false;
+          return true;
+        });
+
+        const spent = budgetTxs.reduce((sum, t) => sum + (t.valueBRL || t.value), 0);
+        const pct = (spent * 100) / (targetCents / 100);
+
+        return {
+          name: b.name,
+          targetCents,
+          spent,
+          pct
+        };
+      }).filter(Boolean);
+
+      budgetProgress.sort((a, b) => b.pct - a.pct);
+      const topBudgets = budgetProgress.slice(0, 5);
+
+      // 4. Charts Data Preparation (20A-1)
+      const last6Months = [];
+      const d = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const tempD = new Date(d.getFullYear(), d.getMonth() - i, 1);
+        last6Months.push(tempD.toISOString().slice(0, 7));
+      }
+
+      const evolutionData = last6Months.map(monthStr => {
+        const monthSpent = txs.filter(t => t.type === "expense" && t.date && t.date.slice(0, 7) === monthStr)
+          .reduce((sum, t) => sum + (t.valueBRL || t.value), 0);
+        return { label: monthStr, value: monthSpent };
+      });
+
+      const currentMonthIncome = txs.filter(t => t.type === "revenue" && t.date && t.date.slice(0, 7) === currentMonth)
+        .reduce((sum, t) => sum + (t.valueBRL || t.value), 0);
+      const currentMonthExpense = txs.filter(t => t.type === "expense" && t.date && t.date.slice(0, 7) === currentMonth)
+        .reduce((sum, t) => sum + (t.valueBRL || t.value), 0);
+      const incExpData = { income: currentMonthIncome, expense: currentMonthExpense };
+
+      // Store in window for wireHomeHandlers to pick up later
+      window.__homeChartsData = { evolutionData, incExpData, currentMonth };
+
       return `
         <div class="card">
           <div><strong>Resumo de Faturas (Aberto)</strong></div>
@@ -251,6 +314,52 @@ const screens = {
                 </div>
               `;
       }).join("")}
+          </div>
+        </div>
+
+        <div class="card">
+          <div><strong>Orçamentos (${currentMonth})</strong></div>
+          <div style="margin-top:10px;">
+            ${budgetProgress.length === 0 ? '<div class="small">Nenhum orçamento configurado.</div>' : ''}
+            ${topBudgets.map(b => {
+        const target = b.targetCents / 100;
+        const spent = b.spent;
+        const boundedPct = Math.min(100, b.pct);
+        const color = b.pct >= 100 ? '#dc3545' : (b.pct >= 80 ? '#fd7e14' : '#28a745');
+        const alertHtml = b.pct >= 100 ? '<span title="Estourado" style="color:#dc3545;">🚨</span>' : (b.pct >= 80 ? '<span title="Atenção" style="color:#fd7e14;">⚠️</span>' : '');
+        return `
+                <div style="margin-bottom:10px;">
+                  <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:2px;">
+                    <strong>${alertHtml} ${esc(b.name)}</strong>
+                    <span>R$ ${spent.toFixed(2)} / ${target.toFixed(2)} (${b.pct.toFixed(0)}%)</span>
+                  </div>
+                  <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
+                    <div style="width:${boundedPct}%; background:${color}; height:100%;"></div>
+                  </div>
+                </div>
+              `;
+      }).join("")}
+          </div>
+          ${budgetProgress.length > 5 ? `<div class="small" style="text-align:center; color:#666; margin-top:5px;">Exibindo os 5 mais críticos de ${budgetProgress.length}.</div>` : ''}
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+             <strong>Despesas (Últ. 6 Meses)</strong>
+             <button type="button" class="small secondary" id="btnExportLine" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
+          </div>
+          <div style="margin-top:10px; width:100%; overflow-x:auto;">
+             <canvas id="homeLineChart" width="340" height="180" style="max-width:100%;"></canvas>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+             <strong>Receitas x Despesas (${currentMonth})</strong>
+             <button type="button" class="small secondary" id="btnExportBars" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
+          </div>
+          <div style="margin-top:10px; width:100%; text-align:center;">
+             <canvas id="homeBarChart" width="300" height="180" style="max-width:100%;"></canvas>
           </div>
         </div>
 
@@ -297,6 +406,7 @@ const screens = {
   bills: async () => await billsScreen(),
   loans: async () => await loansScreen(),
   "rejane-report": async () => await rejaneReportScreen(),
+  "charts-report": async () => await chartsReportScreen(),
   search: async () => await searchScreen()
 };
 
@@ -329,7 +439,8 @@ async function setTab(tabKeyRaw) {
     viewEl.innerHTML = html;
     console.log("[ROUTER] Rendered HTML for:", tabKey);
 
-    if (tabKey === "settings") await wireSettingsHandlers(viewEl);
+    if (tabKey === "home" || tabKey === "") await wireHomeHandlers(viewEl);
+    else if (tabKey === "settings") await wireSettingsHandlers(viewEl);
     else if (tabKey === "tx") await wireTxHandlers(viewEl);
     else if (tabKey === "invoices") await wireInvoiceHandlers(viewEl);
     else if (tabKey === "import") await wireImportHandlers(viewEl);
@@ -338,6 +449,7 @@ async function setTab(tabKeyRaw) {
     else if (tabKey === "bills") await wireBillsHandlers(viewEl);
     else if (tabKey === "loans") await wireLoansHandlers(viewEl);
     else if (tabKey === "rejane-report") await wireRejaneReportHandlers(viewEl);
+    else if (tabKey === "charts-report") await wireChartsReportHandlers(viewEl);
     else if (tabKey === "search") await wireSearchHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
@@ -351,6 +463,43 @@ async function setTab(tabKeyRaw) {
         <button onclick="location.hash='#home'">Voltar Home</button>
       </div>
     `;
+  }
+}
+
+async function wireHomeHandlers(viewEl) {
+  if (window.__homeChartsData) {
+    const { evolutionData, incExpData, currentMonth } = window.__homeChartsData;
+
+    setTimeout(() => {
+      const lineCanvas = viewEl.querySelector("#homeLineChart");
+      if (lineCanvas) {
+        const lineHitboxes = drawLineChart(lineCanvas, evolutionData);
+
+        lineCanvas.onclick = (e) => {
+          if (!lineHitboxes) return;
+          const pos = getCanvasClickPosition(lineCanvas, e);
+          const hit = lineHitboxes.find(h => {
+            const dist = Math.sqrt(Math.pow(pos.x - h.x, 2) + Math.pow(pos.y - h.y, 2));
+            return dist <= Math.max(15, h.radius); // Give a good clickable area
+          });
+          if (hit && hit.data && hit.data.label) {
+            location.hash = `#reports?month=${hit.data.label}`;
+          }
+        };
+
+        lineCanvas.style.cursor = "pointer";
+
+        const btn = viewEl.querySelector("#btnExportLine");
+        if (btn) btn.onclick = () => exportChartToPNG(lineCanvas, `despesas_6meses_${Date.now()}.png`);
+      }
+
+      const barCanvas = viewEl.querySelector("#homeBarChart");
+      if (barCanvas) {
+        drawGroupedBarChart(barCanvas, incExpData);
+        const btn = viewEl.querySelector("#btnExportBars");
+        if (btn) btn.onclick = () => exportChartToPNG(barCanvas, `receitas_despesas_${currentMonth}_${Date.now()}.png`);
+      }
+    }, 50); // Small delay to allow the canvas to be visually placed in the DOM
   }
 }
 
@@ -453,6 +602,13 @@ document.body.addEventListener("click", async (e) => {
     }
   }
 
+  const btnDetails = e.target.closest("[data-action='open-budget-details']");
+  if (btnDetails) {
+    const tmplId = btnDetails.dataset.id;
+    renderBudgetDetailsModal(tmplId);
+    return;
+  }
+
   if (e.target.matches("[data-del]")) {
     if (!confirm("Tem certeza que deseja excluir este item?")) return;
     const [store, id] = e.target.dataset.del.split(":");
@@ -475,4 +631,5 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // PWA: registra SW após DOM estar pronto (banner usa document.body)
   initServiceWorker();
+  runBackgroundMigrations();
 });
