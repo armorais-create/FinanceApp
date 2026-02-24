@@ -1,4 +1,5 @@
 import { list, put, uid, remove, updateTransaction, deleteTransaction, get } from "../db.js";
+import { showToast } from "../ui.js?v=2.0";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
@@ -30,6 +31,12 @@ export async function txScreen() {
 
     return `
     <div id="tx-view-root">
+    
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+        <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
+        <h2 style="margin:0;">Lançamentos</h2>
+    </div>
+
     <div class="card">
         <div><strong>Novo Lançamento</strong></div>
         <form id="txForm" class="form grid">
@@ -104,30 +111,37 @@ export async function txScreen() {
                 <span id="currencyLabel">BRL</span>
             </div>
             
-            <div id="conversionPreview" class="small" style="grid-column: span 2; display:none; gap:10px; align-items:center; color: #666;">
+            <div id="conversionPreview" class="small muted" style="grid-column: span 2; display:none; gap:10px; align-items:center;">
                 <div>Câmbio USD:</div>
                 <input type="number" name="fxRate" id="fxRateInput" step="0.0001" placeholder="${settings.usdRate}" style="width:80px; padding:2px; font-size:11px;" />
                 <div>| Aproximadamente <strong id="brlPreview">R$ 0,00</strong></div>
             </div>
 
-            <button type="submit" style="grid-column: span 2;">Salvar</button>
+            <button type="submit" class="btn btn-primary" style="grid-column: span 2;">Salvar</button>
         </form>
     </div>
 
     <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-             <button data-action="nav" data-hash="#installments" style="background:#eee; border:1px solid #ccc; font-size:0.9em;">Ver Parcelas (Boletos)</button>
+             <button data-action="nav" data-hash="#installments" class="btn btn-ghost small">Ver Parcelas (Boletos)</button>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <div><strong>Lançamentos do Mês</strong></div>
-            <input type="month" id="filterMonth" value="${new Date().toISOString().substring(0, 7)}" />
+            <input type="month" id="filterMonth" class="input" style="flex:0 auto;" value="${new Date().toISOString().substring(0, 7)}" />
         </div>
         
         <div id="txSearchContainer" style="margin-top: 10px;">
             ${renderGlobalSearch(_searchState, categories, tags, people)}
         </div>
 
-        <div class="small" id="txTotalDisplay" style="margin-top: 5px;">Total: ${txs.length}</div>
+        <div class="small" id="txTotalDisplay" style="margin-top: 5px;"></div>
+        
+        <div id="txEmptyState" class="card" style="text-align:center; padding: 40px 20px; margin-top:15px; display:none;">
+            <div style="font-size:3em; margin-bottom:10px;">📝</div>
+            <h3>Nenhum lançamento</h3>
+            <p style="color:#666; margin-bottom:20px;">Use o formulário acima para adicionar novas receitas ou despesas neste período.</p>
+        </div>
+
         <ul class="list" id="txListContainer">
             <!-- Items rendered via refreshList -->
         </ul>
@@ -177,14 +191,14 @@ export async function txScreen() {
                 </select>
             </label>
             
-            <label>Quem Paga <select name="personId">${peoOpts}</select></label>
-            <label>Categoria <select name="categoryId">${catOpts}</select></label>
-            <label>Tags <input type="text" name="tags" placeholder="tag1, tag2" list="editTagList"/></label>
+            <label>Quem Paga <select name="personId" class="select">${peoOpts}</select></label>
+            <label>Categoria <select name="categoryId" class="select">${catOpts}</select></label>
+            <label>Tags <input type="text" name="tags" class="input" placeholder="tag1, tag2" list="editTagList"/></label>
             <datalist id="editTagList">${tagList}</datalist>
 
             <div style="display:flex; gap:10px; margin-top:10px;">
-                <button type="button" id="cancelEdit" style="background:#999">Cancelar</button>
-                <button type="submit">Salvar</button>
+                <button type="button" id="cancelEdit" class="btn btn-ghost">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
             </div>
         </form>
     </dialog>
@@ -260,11 +274,11 @@ function renderTxItem(t, people, accounts, cards, categories) {
     return `
     <li class="listItem" style="${isPayment ? 'background-color: #f0fff4;' : ''}">
         <div style="flex:1">
-            <div><strong>${desc}</strong> <span class="small" style="opacity:0.7">${esc(category)}</span></div>
+            <div><strong>${desc}</strong> <span class="small muted">${esc(category)}</span></div>
             <div class="small">${t.date} · ${esc(person)} · ${esc(sourceName)}</div>
-            ${t.tags ? `<div class="small" style="color:#888">#${esc(t.tags.join(" #"))}</div>` : ""}
-            ${t.kind === "planned_installment" && !t.paid ? `<span style="background:orange; color:white; padding:1px 4px; border-radius:3px; font-size:0.7em;">PENDENTE</span>` : ""}
-            ${t.kind === "planned_installment" && t.paid ? `<span style="background:green; color:white; padding:1px 4px; border-radius:3px; font-size:0.7em;">K PAGO</span>` : ""}
+            ${t.tags ? `<div class="small muted">#${esc(t.tags.join(" #"))}</div>` : ""}
+            ${t.kind === "planned_installment" && !t.paid ? `<span class="badge badge-warning">PENDENTE</span>` : ""}
+            ${t.kind === "planned_installment" && t.paid ? `<span class="badge badge-success">K PAGO</span>` : ""}
         </div>
         <div style="text-align:right; margin-right:10px;">
             <div style="color:${color}; font-weight:bold;">${sign} ${curr} ${amount}</div>
@@ -272,10 +286,10 @@ function renderTxItem(t, people, accounts, cards, categories) {
         </div>
         <div style="display:flex; gap:5px; flex-direction:column; justify-content:center;">
              ${t.kind === "planned_installment" && !t.paid ?
-            `<button class="iconBtn payInstBtn" style="padding:2px 6px; background:green; color:white;" data-id="${t.id}" title="Marcar como Pago">✔</button>`
+            `<button class="iconBtn payInstBtn" style="color:var(--success);" data-id="${t.id}" title="Marcar como Pago">✔</button>`
             : ""}
-             <button class="iconBtn editTxBtn" style="padding:2px 6px;" data-tx="${dataJson}">✎</button>
-             <button class="iconBtn delTxBtn danger" style="padding:2px 6px;" data-id="${t.id}">🗑</button>
+             <button class="iconBtn editTxBtn" data-tx="${dataJson}">✎</button>
+             <button class="iconBtn delTxBtn" style="color:var(--danger);" data-id="${t.id}">🗑</button>
         </div>
     </li>
     `;
@@ -408,7 +422,7 @@ export async function wireTxHandlers(rootEl) {
             const instValue = parseFloat(fd.get("instValue"));
 
             if (!instTotal || instTotal < 2) {
-                alert("Para parcelamento, o número de parcelas deve ser pelo menos 2.");
+                showToast("error", "Para parcelamento, o número de parcelas deve ser pelo menos 2.");
                 return;
             }
 
@@ -503,11 +517,11 @@ export async function wireTxHandlers(rootEl) {
                 form.reset();
                 form.querySelector("input[value='account']").checked = true;
                 toggleMethod();
-                alert("Plano de parcelamento (Boletos) criado com sucesso!");
+                showToast("success", "Plano de parcelamento (Boletos) criado com sucesso!");
                 return;
             } catch (e) {
                 console.error(e);
-                alert("Erro ao salvar parcelamento. Verifique o console.");
+                showToast("error", "Erro ao salvar parcelamento. Verifique o console.");
                 return;
             }
         }
@@ -554,7 +568,7 @@ export async function wireTxHandlers(rootEl) {
         // Restore defaults
         form.querySelector("input[value='account']").checked = true;
         toggleMethod();
-        alert("Salvo!");
+        showToast("success", "Lançamento salvo com sucesso!");
     };
     // END RESTORE FORM LOGIC
 
@@ -784,16 +798,25 @@ async function refreshList(rootEl) {
     const paginatedTxs = txs.slice(0, _searchState.limit);
 
     const ul = rootEl.querySelector("#txListContainer");
-    let html = paginatedTxs.length ? paginatedTxs.map(t => renderTxItem(t, people, accounts, cards, categories)).join("") : "Nada encontrado.";
+    const emptyState = rootEl.querySelector("#txEmptyState");
 
-    if (totalFiltered > _searchState.limit) {
-        html += `<div style="text-align:center; padding: 15px;">
-                    <button id="btnLoadMoreTx" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
-                    <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
-                 </div>`;
+    if (totalFiltered === 0) {
+        ul.style.display = "none";
+        if (emptyState) emptyState.style.display = "block";
+    } else {
+        ul.style.display = "block";
+        if (emptyState) emptyState.style.display = "none";
+
+        let html = paginatedTxs.map(t => renderTxItem(t, people, accounts, cards, categories)).join("");
+
+        if (totalFiltered > _searchState.limit) {
+            html += `<div style="text-align:center; padding: 15px;">
+                        <button id="btnLoadMoreTx" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                        <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
+                     </div>`;
+        }
+        ul.innerHTML = html;
     }
-
-    ul.innerHTML = html;
 
     // Update Total Display
     const totalDisplay = rootEl.querySelector("#txTotalDisplay");

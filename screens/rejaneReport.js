@@ -118,10 +118,30 @@ Resumo por cartão:${Object.keys(chargesByCard).length > 0 ? '\n' + Object.keys(
 
 Vou te enviar o PDF do relatório em anexo.`;
 
+        if (transactions.filter(t => t.type === "expense" && t.cardHolder === "additional" && rejaneCards.some(c => c.id === t.cardId)).length === 0 && monthEvents.length === 0) {
+            return `
+            <div class="print-container">
+                <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                    <button class="btn btn-outline small" id="btnBackRejane">← Voltar</button>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        Mês: <input type="month" id="repMonth" value="${_currentMonth}" class="input small">
+                        <button class="btn btn-primary small" id="btnReloadRejane">Mudar Mês</button>
+                    </div>
+                </div>
+
+                <div class="card" style="text-align:center; padding: 40px 20px; margin-top:15px;">
+                    <div style="font-size:3em; margin-bottom:10px;">👩‍💼</div>
+                    <h3>Sem dados para Rejane neste mês</h3>
+                    <p style="color:#666; margin-bottom:20px;">Não foram encontrados gastos no cartão adicional ou pagamentos neste mês.</p>
+                </div>
+            </div>
+            `;
+        }
+
         return `
             <div class="print-container">
                 <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
-                    <button class="secondary" id="btnBackRejane">← Voltar</button>
+                    <button class="btn btn-outline small" id="btnBackRejane">← Voltar</button>
                     <div style="display:flex; align-items:center; gap:10px;">
                         Mês: <input type="month" id="repMonth" value="${_currentMonth}">
                         <button class="primary" id="btnReloadRejane">Gerar relatório</button>

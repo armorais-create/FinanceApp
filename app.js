@@ -1,5 +1,5 @@
 import { list, put, remove, listByIndex, runBackgroundMigrations } from "./db.js";
-import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal } from "./ui.js?v=2.0";
+import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal, showToast } from "./ui.js?v=2.0";
 import { drawLineChart, drawGroupedBarChart, exportChartToPNG, getCanvasClickPosition } from "./utils/charts.js";
 import { txScreen, wireTxHandlers } from "./screens/tx.js";
 import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
@@ -110,7 +110,7 @@ async function migrateLegacyGoals() {
     console.log("Legacy goals migrated.");
   } catch (e) {
     console.error("Migration Failed", e);
-    alert("Erro na migração de metas: " + e.message);
+    showToast("error", "Erro na migração de metas: " + e.message);
   }
 }
 
@@ -346,7 +346,7 @@ const screens = {
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center;">
              <strong>Despesas (Últ. 6 Meses)</strong>
-             <button type="button" class="small secondary" id="btnExportLine" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
+             <button type="button" class="btn btn-secondary small" id="btnExportLine" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
           </div>
           <div style="margin-top:10px; width:100%; overflow-x:auto;">
              <canvas id="homeLineChart" width="340" height="180" style="max-width:100%;"></canvas>
@@ -356,7 +356,7 @@ const screens = {
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center;">
              <strong>Receitas x Despesas (${currentMonth})</strong>
-             <button type="button" class="small secondary" id="btnExportBars" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
+             <button type="button" class="btn btn-secondary small" id="btnExportGrouped" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
           </div>
           <div style="margin-top:10px; width:100%; text-align:center;">
              <canvas id="homeBarChart" width="300" height="180" style="max-width:100%;"></canvas>
@@ -365,30 +365,30 @@ const screens = {
 
         <div class="card">
           <div><strong>Atalhos Rápidos</strong></div>
-          <div style="margin-top:10px; margin-bottom:10px;">
-            <button data-action="nav" data-hash="#search" style="width:100%; background:#e83e8c; color:white; padding:12px; font-weight:bold; font-size:1.1em;">🔍 Busca Avançada</button>
-          </div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-            <button data-action="nav" data-hash="#reports" style="background:#007bff; color:white;">📊 Painel / Relatórios</button>
-            <button data-action="nav" data-hash="#tx">Novo Lançamento</button>
-            <button data-action="nav" data-hash="#import">Importar Planilha</button>
-            <button data-action="nav" data-hash="#invoices" style="background:#6c757d; color:white;">Ver Faturas</button>
-            <button data-action="nav" data-hash="#settings" style="background:#555; color:white; grid-column: span 2;">Configurações</button>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+            <button class="btn btn-primary" data-action="nav" data-hash="#import">📥 Importar</button>
+            <button class="btn btn-primary" data-action="nav" data-hash="#invoices">💳 Ver Faturas</button>
+            <button class="btn btn-primary" data-action="nav" data-hash="#bills">🗓️ Contas a Pagar</button>
+            <button class="btn btn-primary" data-action="nav" data-hash="#loans">🤝 Dívidas</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#search">🔍 Buscar</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#reports">📊 Painel</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#rejane-report">👩‍💼 Relatório Rejane</button>
+            <button class="btn btn-secondary" id="btnExportPackHome">📦 Backup Rápido</button>
           </div>
         </div>
         
         <div class="card" style="border: 1px solid #17a2b8;">
           <div style="color:#17a2b8;"><strong>Contas a Pagar</strong></div>
           <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-            <button data-action="nav" data-hash="#bills" style="background:#17a2b8; color:white;">📅 Mês Atual</button>
-            <button data-action="nav" data-hash="#bills?next" style="background:#fff; color:#17a2b8; border:1px solid #17a2b8;">➡️ Próximos 30 Dias</button>
+            <button class="btn btn-primary" data-action="nav" data-hash="#bills" style="background:#17a2b8; color:white;">📅 Mês Atual</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#bills?next" style="background:#fff; color:#17a2b8; border:1px solid #17a2b8;">➡️ Próximos 30 Dias</button>
           </div>
         </div>
 
         <div class="card" style="border: 1px solid #28a745; margin-top:10px;">
           <div style="color:#28a745;"><strong>Dívidas & Empréstimos</strong></div>
           <div class="grid" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-top:10px;">
-            <button data-action="nav" data-hash="#loans" style="background:#28a745; color:white; padding:10px;">🤝 Controle de Dívidas</button>
+            <button class="btn btn-success" data-action="nav" data-hash="#loans" style="padding:10px;">🤝 Controle de Dívidas</button>
           </div>
         </div>
       `;
@@ -460,9 +460,8 @@ async function setTab(tabKeyRaw) {
       <div class="card" style="border-left: 5px solid red;">
         <strong>Erro na tela!</strong><br/>
         <p>${err.message}</p>
-        <button onclick="location.hash='#home'">Voltar Home</button>
-      </div>
-    `;
+          <br/><button class="btn btn-primary small" onclick="location.hash='#import'">Ir para Importação</button>
+        </div>`;
   }
 }
 
@@ -483,7 +482,7 @@ async function wireHomeHandlers(viewEl) {
             return dist <= Math.max(15, h.radius); // Give a good clickable area
           });
           if (hit && hit.data && hit.data.label) {
-            location.hash = `#reports?month=${hit.data.label}`;
+            location.hash = `#reports ? month = ${hit.data.label} `;
           }
         };
 
@@ -500,6 +499,14 @@ async function wireHomeHandlers(viewEl) {
         if (btn) btn.onclick = () => exportChartToPNG(barCanvas, `receitas_despesas_${currentMonth}_${Date.now()}.png`);
       }
     }, 50); // Small delay to allow the canvas to be visually placed in the DOM
+
+    const btnExportPackHome = viewEl.querySelector("#btnExportPackHome");
+    if (btnExportPackHome) {
+      btnExportPackHome.onclick = async () => {
+        const { prepareExportPack } = await import("./ui.js?v=2.0");
+        await prepareExportPack();
+      };
+    }
   }
 }
 
@@ -527,14 +534,14 @@ function showUpdateBanner(reg) {
   banner.style.gap = "12px";
 
   banner.innerHTML = `
-    <div style="font-size:14px; line-height:1.2;">
+      <div style="font-size:14px; line-height:1.2;">
       <div style="font-weight:600;">Nova versão disponível</div>
       <div style="opacity:0.75;">Toque em “Atualizar agora” para aplicar.</div>
     </div>
-    <button id="pwa-update-btn" style="padding:10px 12px; border-radius:10px; border:1px solid #ccc; cursor:pointer; background:#f7f7f7;">
-      Atualizar agora
-    </button>
-  `;
+      <button id="pwa-update-btn" class="btn btn-primary small">
+        Atualizar agora
+      </button>
+    `;
 
   document.body.appendChild(banner);
 

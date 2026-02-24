@@ -1,5 +1,5 @@
-
 import { list, put, uid, get, deleteInvoice, deleteTransaction, updateTransaction, addInvoicePayment, listInvoicePaymentsByInvoiceKey, deleteInvoicePayment, makeInvoiceKey } from "../db.js";
+import { showToast } from "../ui.js?v=2.0";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 import { isInvoicePayment } from "./tx.js";
 
@@ -38,7 +38,18 @@ export async function invoiceScreen() {
 }
 
 async function renderInvoiceView(cards, accounts) {
-    if (!cards.length) return `<div class="card">Cadastre cartões primeiro na aba Config.</div>`;
+    if (!cards.length) {
+        return `
+        <div class="card" style="text-align:center; padding: 40px 20px;">
+            <div style="font-size:3em; margin-bottom:10px;">💳</div>
+            <h3>Nenhum cartão cadastrado</h3>
+            <p style="color:#666; margin-bottom:20px;">Para gerenciar faturas, adicione um cartão de crédito.</p>
+            <button class="btn btn-primary" onclick="location.hash='#settings'">Ir para Configurações</button>
+            <div style="margin-top:15px;">
+                <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
+            </div>
+        </div>`;
+    }
 
     // Ensure currentCardId is valid or fallback
     if (cards.length && !cards.find(c => c.id === currentCardId)) currentCardId = cards[0].id;
@@ -107,7 +118,31 @@ async function renderInvoiceView(cards, accounts) {
     const peopleOpts = `<option value="">(Sem Pessoa)</option>` + people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
     const tagList = tags.map(t => `<option value="${esc(t.name)}">`).join("");
 
+    // Check for Empty State
+    const hasData = invoiceTxs.length > 0 || invoicePayments.length > 0;
+    let mainContentHtml = "";
+
+    if (!hasData && !_searchState.query && !_searchState.categoryId && !_searchState.personId) {
+        mainContentHtml = `
+        <div class="card" style="text-align:center; padding: 40px 20px; margin-top:15px;">
+            <div style="font-size:3em; margin-bottom:10px;">📄</div>
+            <h3>Nenhuma transação nesta fatura</h3>
+            <p style="color:#666; margin-bottom:20px;">Importe os dados do seu banco ou adicione lançamentos manualmente para esta competência.</p>
+            <button class="btn btn-primary" onclick="location.hash='#import'">Ir para Importar</button>
+        </div>`;
+    } else {
+        // Proceed with normal rendering of the invoice items
+        mainContentHtml = `
+            <!-- (Placeholders based on normal rendering. To be filled by subsequent code) -->
+        `;
+    }
+
     return `
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+        <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
+        <h2 style="margin:0;">Faturas de Cartão</h2>
+    </div>
+
     <div id="invoice-view-root">
     <!--Header -->
     <div class="card">
@@ -121,13 +156,13 @@ async function renderInvoiceView(cards, accounts) {
             </div>
         </div>
         <div class="form grid" style="margin-top:10px;">
-            <select id="invCardSelect">
+            <select id="invCardSelect" class="select">
                 ${cards.map(c => `<option value="${c.id}" ${c.id === currentCardId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
             </select>
-            <input id="invMonthInput" type="month" value="${currentMonth}" />
+            <input id="invMonthInput" type="month" class="input" value="${currentMonth}" />
         </div>
         <div style="margin-top:5px; text-align:right;">
-             <button id="btnDeleteInvoice" class="danger small" style="padding:4px 8px;">Excluir Fatura</button>
+             <button id="btnDeleteInvoice" class="btn btn-danger small" style="padding:4px 8px;">Excluir Fatura</button>
         </div>
         
         <div id="invSearchContainer" style="margin-top: 10px;">
@@ -160,9 +195,10 @@ async function renderInvoiceView(cards, accounts) {
             ${mainPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold; color:green">Pagamentos:</div>` : ""}
             ${mainPayments.map(p => renderPaymentItem(p)).join("")}
         </ul>
+        </ul>
         ${remainingMain > 0.01 ? `
         <div style="margin-top:10px; text-align:right;">
-             <button class="payBtn" data-holder="main" data-amount="${remainingMain.toFixed(2)}">Registrar Pagamento (Titular)</button>
+             <button class="payBtn btn btn-primary" data-holder="main" data-amount="${remainingMain.toFixed(2)}">Registrar Pagamento (Titular)</button>
         </div>` : ""}
     </div>
 
@@ -181,9 +217,10 @@ async function renderInvoiceView(cards, accounts) {
             ${addPayments.length ? `<div class="small" style="margin-top:10px; font-weight:bold; color:green">Pagamentos:</div>` : ""}
             ${addPayments.map(p => renderPaymentItem(p)).join("")}
         </ul>
+        </ul>
         ${remainingAdd > 0.01 ? `
         <div style="margin-top:10px; text-align:right;">
-             <button class="payBtn" data-holder="additional" data-amount="${remainingAdd.toFixed(2)}">Registrar Pagamento (Adicional)</button>
+             <button class="payBtn btn btn-primary" data-holder="additional" data-amount="${remainingAdd.toFixed(2)}">Registrar Pagamento (Adicional)</button>
         </div>` : ""}
     </div>
     ` : ""
@@ -207,12 +244,12 @@ async function renderInvoiceView(cards, accounts) {
             </label>
             
             <label>Valor
-                <input name="value" type="number" step="0.01" id="payValue" required />
+                <input name="value" type="number" step="0.01" id="payValue" required class="input" />
             </label>
             
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button type="button" id="cancelPay" style="background:#999">Cancelar</button>
-                <button type="submit" style="background:green">Confirmar</button>
+                <button type="button" id="cancelPay" class="btn btn-ghost">Cancelar</button>
+                <button type="submit" class="btn btn-success">Confirmar</button>
             </div>
         </form>
     </dialog>
@@ -274,8 +311,8 @@ async function renderInvoiceView(cards, accounts) {
             <datalist id="editTagList">${tagList}</datalist>
 
             <div style="display:flex; gap:10px; margin-top:10px;">
-                <button type="button" id="cancelEdit" style="background:#999">Cancelar</button>
-                <button type="submit">Salvar</button>
+                <button type="button" id="cancelEdit" class="btn btn-ghost">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
             </div>
         </form>
     </dialog>
@@ -299,7 +336,7 @@ function renderPaymentItem(p) {
             <div>${amount}</div>
         </div>
         <div style="display:flex; gap:5px;">
-            <button class="iconBtn delPayBtn danger" data-id="${p.id}" data-txid="${p.txId || ''}" title="Excluir Pagamento">🗑</button>
+            <button class="iconBtn delPayBtn" style="color:var(--danger);" data-id="${p.id}" data-txid="${p.txId || ''}" title="Excluir Pagamento">🗑</button>
         </div>
     </li>
     `;
@@ -340,7 +377,7 @@ function renderItem(t, isPayment = false) {
         </div>
         <div style="display:flex; gap:5px;">
             <button class="iconBtn editTxBtn" data-tx="${dataJson}">✎</button>
-            <button class="iconBtn delTxBtn danger" data-id="${t.id}" title="Excluir Lançamento">🗑</button>
+            <button class="iconBtn delTxBtn" style="color:var(--danger);" data-id="${t.id}" title="Excluir Lançamento">🗑</button>
         </div>
     </li>
     `;
@@ -373,7 +410,7 @@ export async function wireInvoiceHandlers(rootEl) {
                 // 2. Delete Expenses via index
                 await deleteInvoice(currentCardId, currentMonth);
 
-                alert("Fatura e pagamentos excluídos.");
+                showToast("success", "Fatura e pagamentos excluídos.");
                 refreshInvoice(rootEl);
             }
         };
@@ -452,7 +489,7 @@ export async function wireInvoiceHandlers(rootEl) {
             const accountId = fd.get("accountId") || null; // Optional
 
             if (val <= 0) {
-                alert("Valor deve ser positivo.");
+                showToast("error", "Valor deve ser positivo.");
                 return;
             }
 

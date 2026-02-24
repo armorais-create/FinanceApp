@@ -1,4 +1,5 @@
 import { list, put, remove, uid, get, deleteTransaction, listByIndex } from "../db.js";
+import { showToast } from "../ui.js?v=2.0";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 
 function esc(s) {
@@ -123,7 +124,6 @@ export async function billsScreen() {
                 b.status = 'paid';
                 mutated = true;
             }
-            // 5. Cleanup Skipped
             if (b.status === 'skipped') {
                 if (b.paidAmount > 0 || b.paidTxId || b.paidViaType) {
                     b.paidAmount = 0;
@@ -244,18 +244,18 @@ export async function billsScreen() {
                 const t = totals[cur] || { expected: 0, open: 0, paid: 0 };
                 const isUSD = cur === 'USD';
                 return `
-                 <div style="display:flex; justify-content:space-around; background:#f8f9fa; padding:10px; border-radius:8px; margin-bottom:5px; border:1px solid #eee;">
+                 <div class="summary-card">
                     <div style="text-align:center;">
                         <div class="small text-muted">Aberto (${cur})</div>
-                        <div style="font-weight:bold; color:#d63384; font-size:1.1em;">${cur} ${t.open.toFixed(2)}</div>
+                        <div style="font-weight:bold; color:var(--danger); font-size:1.1em;">${cur} ${t.open.toFixed(2)}</div>
                     </div>
                     <div style="text-align:center;">
                          <div class="small text-muted">Pago (${cur})</div>
-                         <div style="font-weight:bold; color:#28a745; font-size:1.1em;">${cur} ${t.paid.toFixed(2)}</div>
+                         <div style="font-weight:bold; color:var(--success); font-size:1.1em;">${cur} ${t.paid.toFixed(2)}</div>
                     </div>
                     <div style="text-align:center;">
                         <div class="small text-muted">Previsto</div>
-                        <div style="font-weight:bold; color:#666;">${cur} ${t.expected.toFixed(2)}</div>
+                        <div style="font-weight:bold; color:var(--text-color);">${cur} ${t.expected.toFixed(2)}</div>
                     </div>
                  </div>
                  `;
@@ -280,21 +280,21 @@ export async function billsScreen() {
             return `
              <div style="display:flex; gap:5px; overflow-x:auto; padding-bottom:5px; align-items:center;">
                  <div class="btn-group">
-                     <button class="small ${_filters.status === 'all' ? 'primary' : 'secondary'}" data-filter="status" data-val="all">Todos</button>
-                     <button class="small ${_filters.status === 'open' ? 'primary' : 'secondary'}" data-filter="status" data-val="open">Abertos</button>
-                     <button class="small ${_filters.status === 'paid' ? 'primary' : 'secondary'}" data-filter="status" data-val="paid">Pagos</button>
+                     <button class="btn ${_filters.status === 'all' ? 'btn-primary' : 'btn-ghost'} small" data-filter="status" data-val="all">Todos</button>
+                     <button class="btn ${_filters.status === 'open' ? 'btn-primary' : 'btn-ghost'} small" data-filter="status" data-val="open">Abertos</button>
+                     <button class="btn ${_filters.status === 'paid' ? 'btn-primary' : 'btn-ghost'} small" data-filter="status" data-val="paid">Pagos</button>
                  </div>
-                     <div style="width:1px; background:#ccc; height:20px; margin:0 5px;"></div>
-                 <select id="filterMethod" style="padding:2px; font-size:0.9em; border-radius:4px;">
+                     <div style="width:1px; background:var(--border-color); height:20px; margin:0 5px;"></div>
+                 <select id="filterMethod" class="select" style="padding:2px; font-size:0.9em;">
                      <option value="all" ${_filters.method === 'all' ? 'selected' : ''}>Todas Vias</option>
                      <option value="account" ${_filters.method === 'account' ? 'selected' : ''}>Via Conta</option>
                      <option value="card" ${_filters.method === 'card' ? 'selected' : ''}>Via Cartão</option>
                  </select>
-                 <select id="filterPerson" style="padding:2px; font-size:0.9em; border-radius:4px; display: none;">
+                 <select id="filterPerson" class="select" style="padding:2px; font-size:0.9em; display: none;">
                      <!-- Oculto para evitar duplicar com o global search -->
                      <option value="">Todas Pessoas</option>
                  </select>
-                 <select id="filterSort" style="padding:2px; font-size:0.9em; border-radius:4px;">
+                 <select id="filterSort" class="select" style="padding:2px; font-size:0.9em;">
                      ${Object.entries(SORT_OPTIONS).map(([k, v]) => `<option value="${k}" ${_filters.sort === k ? 'selected' : ''}>${v}</option>`).join('')}
                  </select>
                  <label style="display:flex; align-items:center; gap:3px; font-size:0.9em; margin-left:5px; white-space:nowrap; cursor:pointer;">
@@ -407,10 +407,10 @@ export async function billsScreen() {
                 </div>
 
                 <div style="display:flex; flex-direction:column; gap:5px;">
-                    <button class="small success" id="btnPayAllBills" ${countOpen === 0 ? 'disabled' : ''} style="opacity:${countOpen === 0 ? '0.5' : '1'};">
+                    <button class="btn btn-success small" id="btnPayAllBills" ${countOpen === 0 ? 'disabled' : ''} style="opacity:${countOpen === 0 ? '0.5' : '1'};">
                         ✅ Marcar todas como pagas
                     </button>
-                    <button class="small outline" id="btnReopenAllBills" ${countPaid === 0 ? 'disabled' : ''} style="opacity:${countPaid === 0 ? '0.5' : '1'}; color:#333; border:1px solid #ccc;">
+                    <button class="btn btn-ghost small" id="btnReopenAllBills" ${countPaid === 0 ? 'disabled' : ''} style="opacity:${countPaid === 0 ? '0.5' : '1'};">
                         🔄 Reabrir todas pagas
                     </button>
                 </div>
@@ -471,9 +471,9 @@ export async function billsScreen() {
         };
 
         return `
-        <div style="display:flex; gap:10px; margin-bottom:15px; border-bottom:2px solid #ddd; padding-bottom:5px;">
-            <button id="tabMonth" class="${_state.currentTab === 'month' ? 'primary' : 'outline'}" style="flex:1; border:none; ${_state.currentTab === 'month' ? '' : 'color:#555; background:transparent; border-bottom:3px solid transparent;'} border-radius:4px 4px 0 0; font-weight:bold;">Mês Atual</button>
-            <button id="tabTemplates" class="${_state.currentTab === 'templates' ? 'primary' : 'outline'}" style="flex:1; border:none; ${_state.currentTab === 'templates' ? '' : 'color:#555; background:transparent; border-bottom:3px solid transparent;'} border-radius:4px 4px 0 0; font-weight:bold;">Recorrentes / Fixos</button>
+        <div style="display:flex; gap:10px; margin-bottom:15px; border-bottom:2px solid var(--border-color); padding-bottom:5px;">
+            <button id="tabMonth" class="btn ${_state.currentTab === 'month' ? 'btn-primary' : 'btn-ghost'}" style="flex:1; border-radius:4px 4px 0 0;">Mês Atual</button>
+            <button id="tabTemplates" class="btn ${_state.currentTab === 'templates' ? 'btn-primary' : 'btn-ghost'}" style="flex:1; border-radius:4px 4px 0 0;">Recorrentes / Fixos</button>
         </div>
 
         <div id="tabContentMonth" style="display:${_state.currentTab === 'month' ? 'block' : 'none'};">
@@ -481,8 +481,8 @@ export async function billsScreen() {
                 <div style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px;">
                     <div style="font-weight:bold; font-size:1.1em;">Contas a Pagar</div>
                     <div style="display:flex; gap:5px;">
-                         <input type="month" id="billMonth" value="${currentMonth}" style="padding:5px;">
-                         <button id="btnBillToday">Hoje</button>
+                         <input type="month" id="billMonth" class="input" value="${currentMonth}" style="padding:5px;">
+                         <button id="btnBillToday" class="btn btn-secondary">Hoje</button>
                     </div>
                 </div>
 
@@ -491,8 +491,8 @@ export async function billsScreen() {
                 ${renderMethodBreakdown()}
 
                 <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button id="btnGenerateMonth" style="flex:1; background:#007bff; color:white;">🔄 Gerar Mensais</button>
-                    <button id="btnNewSingleBill" style="flex:1; background:#28a745; color:white;">+ Avulsa / Lançamento</button>
+                    <button id="btnGenerateMonth" class="btn btn-primary" style="flex:1;">🔄 Gerar Mensais</button>
+                    <button id="btnNewSingleBill" class="btn btn-success" style="flex:1;">+ Avulsa / Lançamento</button>
                 </div>
             </div>
 
@@ -508,7 +508,7 @@ export async function billsScreen() {
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <strong style="font-size:1.1em;">Gerenciador de Fixos</strong>
-                    <button class="primary" id="btnNewTemplate">+ Novo Fixo</button>
+                    <button class="btn btn-primary" id="btnNewTemplate">+ Novo Fixo</button>
                 </div>
 
                 ${_state.editingTemplate ? renderTemplateForm(_state.editingTemplate, categories, subcategories, people, accounts, cards) : ''}
@@ -548,12 +548,12 @@ export async function billsScreen() {
                                         <button class="iconBtn" data-action="edit-tmpl" data-id="${t.id}" title="Editar">✎</button>
                                         <button class="iconBtn" data-action="dup-tmpl" data-id="${t.id}" title="Duplicar">📑</button>
                                         ${t.active ?
-                    `<button class="iconBtn secondary" data-action="toggle-tmpl" data-id="${t.id}" title="Pausar Fixo">⏸</button>` :
-                    `<button class="iconBtn success" data-action="toggle-tmpl" data-id="${t.id}" title="Ativar Fixo">▶️</button>`
+                    `<button class="iconBtn text-muted" data-action="toggle-tmpl" data-id="${t.id}" title="Pausar Fixo">⏸</button>` :
+                    `<button class="iconBtn text-success" data-action="toggle-tmpl" data-id="${t.id}" title="Ativar Fixo">▶️</button>`
                 }
-                                        <button class="iconBtn danger" data-del="bill_templates:${t.id}" title="Excluir">×</button>
+                                        <button class="iconBtn text-danger" data-del="bill_templates:${t.id}" title="Excluir">×</button>
                                     </div>
-                                    <div class="small" style="color:${t.active ? '#28a745' : '#dc3545'}; font-weight:bold;">
+                                    <div class="small" style="color:var(${t.active ? '--success' : '--danger'}); font-weight:bold;">
                                         ${t.active ? 'ATIVO' : 'PAUSADO'}
                                     </div>
                                 </div>
@@ -566,7 +566,7 @@ export async function billsScreen() {
             <!-- PLANS SECTION -->
             <div class="card" style="margin-top:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <button id="btnTogglePlans" style="flex:1; background:#17a2b8; color:white; text-align:left; padding-left:15px;">
+                    <button class="btn btn-primary" id="btnTogglePlans" style="flex:1; text-align:left; padding-left:15px;">
                         📅 Planos Parcelados (${activePlans.length})
                     </button>
                 </div>
@@ -574,7 +574,7 @@ export async function billsScreen() {
                 <div id="plansSection" style="display:${_state.showPlanForm ? 'block' : 'none'};">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <strong>Cadastro de Planos</strong>
-                        <button class="small" id="btnNewPlan">+ Novo Plano</button>
+                        <button class="btn btn-secondary small" id="btnNewPlan">+ Novo Plano</button>
                     </div>
 
                     ${_state.editingPlan ? renderPlanForm(_state.editingPlan, categories, subcategories, people, accounts, cards) : ''}
@@ -594,12 +594,12 @@ export async function billsScreen() {
                                         <div style="display:flex; gap:5px;">
                                             <button class="iconBtn" data-action="edit-plan" data-id="${p.id}">✎</button>
                                             ${p.active ?
-                        `<button class="iconBtn" data-action="toggle-plan" data-id="${p.id}" title="Desativar">⏸</button>` :
-                        `<button class="iconBtn" data-action="toggle-plan" data-id="${p.id}" title="Ativar">▶️</button>`
+                        `<button class="iconBtn text-muted" data-action="toggle-plan" data-id="${p.id}" title="Desativar">⏸</button>` :
+                        `<button class="iconBtn text-success" data-action="toggle-plan" data-id="${p.id}" title="Ativar">▶️</button>`
                     }
-                                            <button class="iconBtn danger" data-del="bill_plans:${p.id}">×</button>
+                                            <button class="iconBtn text-danger" data-del="bill_plans:${p.id}">×</button>
                                         </div>
-                                        ${p.active ? `<button class="small primary" data-action="gen-plan-bills" data-id="${p.id}" style="font-size:0.8em; padding:2px 5px;">Gerar Parcelas</button>` : ''}
+                                        ${p.active ? `<button class="btn btn-primary small" data-action="gen-plan-bills" data-id="${p.id}" style="font-size:0.8em; padding:2px 5px;">Gerar Parcelas</button>` : ''}
                                     </div>
                                 </li>
                             `).join('')}
@@ -612,10 +612,10 @@ export async function billsScreen() {
         </div> <!-- End of single tab wrapping container if needed, but we keep the main return div flat, wait, we opened a tabContentMonth div earlier -->
 
         <!-- UPCOMING MONTHS PREVIEW -->
-        <div class="card" style="margin-top:10px; background:#e9ecef;">
+        <div class="card" style="margin-top:10px; background:var(--bg-color);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="font-weight:bold;">Visão Futura</div>
-                <button id="btnToggleUpcoming" class="small ${_state.showUpcoming ? 'secondary' : 'primary'}">
+                <button id="btnToggleUpcoming" class="btn ${_state.showUpcoming ? 'btn-secondary' : 'btn-primary'} small">
                     ${_state.showUpcoming ? 'Ocultar Próximos 3 Meses' : 'Ver Próximos 3 Meses'}
                 </button>
             </div>
@@ -638,7 +638,7 @@ export async function billsScreen() {
                 ${renderGlobalSearch(_searchState, categories, tags, people)}
             </div>
 
-            <hr style="margin: 10px 0; border:0; border-top:1px solid #eee;">
+            <hr style="margin: 10px 0; border:0; border-top:1px solid var(--border-color);">
 
             <strong>Contas de ${currentMonth} (${totalFiltered})</strong>
             <div style="margin-top:10px;">
@@ -680,9 +680,9 @@ export async function billsScreen() {
                         } else {
                             // Open
                             if (isOverdue) {
-                                paidLabel = `<span style="background:#dc3545; color:white; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:0.9em;">VENCIDA</span>`;
+                                paidLabel = `<span class="badge badge-danger">VENCIDA</span>`;
                             } else {
-                                paidLabel = `<span style="color:#666;">Vence em: <strong>${formatDate(b.dueDate)}</strong></span>`;
+                                paidLabel = `<span class="text-muted">Vence em: <strong>${formatDate(b.dueDate)}</strong></span>`;
                             }
                         }
 
@@ -693,8 +693,8 @@ export async function billsScreen() {
                             <div style="flex:1;">
                                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                                      <div>
-                                        <span style="font-weight:bold; font-size:1.05em; ${isPaid || isSkipped ? 'text-decoration:line-through; color:#999' : ''}">${esc(b.name || getTemplateName(b, templates))}</span>
-                                        ${personName ? `<span class="badge" style="background:#e9ecef; color:#333;">${esc(personName)}</span>` : ''}
+                                        <span style="font-weight:bold; font-size:1.05em; ${isPaid || isSkipped ? 'text-decoration:line-through; color:var(--text-muted)' : ''}">${esc(b.name || getTemplateName(b, templates))}</span>
+                                        ${personName ? `<span class="badge">${esc(personName)}</span>` : ''}
                                     </div>
                                     <div style="text-align:right;">
                                         <div style="font-weight:bold; ${isPartial ? 'color:#fd7e14' : ''}">${b.currency} ${b.amount.toFixed(2)}</div>
@@ -713,33 +713,33 @@ export async function billsScreen() {
                              </div>
 
                             <div style="display:flex; gap:5px; align-items:center; margin-left:10px;">
-                                ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="secondary small" data-action="move-bill-up" data-id="${b.id}" style="padding:4px 8px;" title="Subir">↑</button>` : ''}
-                                ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="secondary small" data-action="move-bill-down" data-id="${b.id}" style="padding:4px 8px;" title="Descer">↓</button>` : ''}
-                                ${!isPaid && !isSkipped ? `<button class="${b.pinned ? 'primary' : 'secondary'} small" data-action="toggle-bill-pin" data-id="${b.id}" style="padding:4px 8px;" title="${b.pinned ? 'Desfixar' : 'Fixar no topo'}">📌</button>` : ''}
+                                ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="btn btn-ghost small" data-action="move-bill-up" data-id="${b.id}" style="padding:4px 8px;" title="Subir">↑</button>` : ''}
+                                ${!isPaid && !isSkipped && _filters.sort === 'manual_asc' ? `<button class="btn btn-ghost small" data-action="move-bill-down" data-id="${b.id}" style="padding:4px 8px;" title="Descer">↓</button>` : ''}
+                                ${!isPaid && !isSkipped ? `<button class="btn ${b.pinned ? 'btn-primary' : 'btn-ghost'} small" data-action="toggle-bill-pin" data-id="${b.id}" style="padding:4px 8px;" title="${b.pinned ? 'Desfixar' : 'Fixar no topo'}">📌</button>` : ''}
                                 
-                                ${!isPaid && !isSkipped ? `<button class="secondary small" data-action="edit-single-bill" data-id="${b.id}" style="padding:4px 8px;" title="Editar Lançamento">✏️</button>` : ''}
+                                ${!isPaid && !isSkipped ? `<button class="btn btn-ghost small" data-action="edit-single-bill" data-id="${b.id}" style="padding:4px 8px;" title="Editar Lançamento">✏️</button>` : ''}
                                 
                                 ${!isPaid && !isSkipped ?
-                                `<button class="success small" data-action="pay-bill" data-title="Pagar" data-id="${b.id}" style="padding:4px 8px;">💲</button>` :
-                                (isPaid || isPartial ? `<button class="secondary small" data-action="undo-bill" data-title="Desfazer / Histórico" data-id="${b.id}" style="padding:4px 8px;">↩️</button>` : '')
+                                `<button class="btn btn-success small" data-action="pay-bill" data-title="Pagar" data-id="${b.id}" style="padding:4px 8px;">💲</button>` :
+                                (isPaid || isPartial ? `<button class="btn btn-secondary small" data-action="undo-bill" data-title="Desfazer / Histórico" data-id="${b.id}" style="padding:4px 8px;">↩️</button>` : '')
                             }
-                                ${!isPaid && !isSkipped && !isPartial ? `<button class="secondary small" data-action="skip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Pular Parcela/Conta">⏭</button>` : ''}
-                                ${isSkipped ? `<button class="primary small" data-action="unskip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Reabrir">🔄 Reabrir</button>` : ''}
+                                ${!isPaid && !isSkipped && !isPartial ? `<button class="btn btn-ghost small" data-action="skip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Pular Parcela/Conta">⏭</button>` : ''}
+                                ${isSkipped ? `<button class="btn btn-primary small" data-action="unskip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Reabrir">🔄 Reabrir</button>` : ''}
                                 ${b.templateId ? `<button class="iconBtn" data-action="edit-source-tmpl" data-id="${b.templateId}" title="Editar recorrência" style="font-size:1.1em;">⚙️</button>` : ''}
-                                <button class="iconBtn danger" data-del="bills:${b.id}" style="padding:4px 8px;">×</button>
+                                <button class="iconBtn text-danger" data-del="bills:${b.id}" style="padding:4px 8px;">×</button>
                              </div>
                         </li>
                     `}).join('')}
                 </ul>
                 ${totalFiltered > _searchState.limit ? `<div style="text-align:center; padding: 15px;">
-                    <button id="btnLoadMoreBills" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
-                    <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
+                    <button id="btnLoadMoreBills" class="btn btn-secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                    <div class="small text-muted" style="margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
                  </div>` : ''}
             </div>
         </div>
 
         <!--PAY BILL DIALOG-->
-        <dialog id="payBillDialog" style="padding:20px; border:1px solid #ccc; border-radius:8px; width: 90%; max-width:450px;">
+        <dialog id="payBillDialog" class="dialog">
             <h3>Registrar Pagamento</h3>
             <div id="payBillTitle" style="margin-bottom:10px; font-weight:bold;"></div>
 
@@ -751,11 +751,11 @@ export async function billsScreen() {
                 <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px;">
                     <label>
                         Data do Pagamento
-                        <input type="date" name="date" required>
+                        <input type="date" name="date" class="input" required>
                     </label>
                     <label>
                         Valor a Pagar (R$)
-                        <input type="number" step="0.01" name="payVal" id="payValInput" required>
+                        <input type="number" step="0.01" name="payVal" id="payValInput" class="input" required>
                     </label>
                 </div>
 
@@ -806,14 +806,14 @@ export async function billsScreen() {
                 </div>
 
                 <div style="margin-top:15px; display:flex; gap:10px;">
-                    <button type="submit" style="flex:1; background:#28a745;">Confirmar</button>
-                    <button type="button" id="btnCancelPay" style="flex:1; background:#6c757d;">Cancelar</button>
+                    <button type="submit" class="btn btn-success" style="flex:1;">Confirmar</button>
+                    <button type="button" id="btnCancelPay" class="btn btn-ghost" style="flex:1;">Cancelar</button>
                 </div>
             </form>
         </dialog>
 
         <!-- GENERATE MONTH PREVIEW DIALOG -->
-        <dialog id="genMonthPreviewDialog" style="padding:20px; border:1px solid #ccc; border-radius:8px; width: 95%; max-width:600px;">
+        <dialog id="genMonthPreviewDialog" class="dialog" style="width: 95%; max-width:600px;">
             <h3>Prévia de Geração (${currentMonth})</h3>
             <div class="small text-muted" style="margin-bottom:15px;">Selecione quais fixos deseja gerar agora. Contas que já existem no mês corrente aparecem desmarcadas.</div>
             
@@ -845,19 +845,19 @@ export async function billsScreen() {
                 </div>
 
                 <div style="display:flex; gap:10px;">
-                    <button type="submit" style="flex:1; background:#007bff; font-weight:bold;">Confirmar Geração</button>
-                    <button type="button" id="btnCancelGenMonth" style="flex:1; background:#6c757d;">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="flex:1;">Confirmar Geração</button>
+                    <button type="button" id="btnCancelGenMonth" class="btn btn-ghost" style="flex:1;">Cancelar</button>
                 </div>
             </form>
         </dialog>
 
         <!-- UNDO PAYMENT DIALOG -->
-        <dialog id="undoPaymentDialog" style="padding:20px; border:1px solid #ccc; border-radius:8px; width: 95%; max-width:500px;">
+        <dialog id="undoPaymentDialog" class="dialog" style="width: 95%; max-width:500px;">
             <h3>Histórico de Pagamentos</h3>
             <div id="undoPaymentTitle" style="margin-bottom:10px; font-weight:bold;"></div>
             <div id="undoPaymentList" style="max-height:300px; overflow-y:auto; margin-bottom:15px;"></div>
             <div style="display:flex; gap:10px;">
-                <button type="button" id="btnCancelUndoPayment" style="flex:1; background:#6c757d; color:white;">Fechar</button>
+                <button type="button" id="btnCancelUndoPayment" class="btn btn-secondary" style="flex:1;">Fechar</button>
             </div>
         </dialog>
 
@@ -927,39 +927,39 @@ function getTemplateName(bill, templates) {
 
 function renderSingleBillForm(categories, subcategories, people, accounts, cards) {
     return `
-        <form id="singleBillForm" class="form" style="background:#eee; padding:10px; border-radius:5px; margin-bottom:10px;">
+        <form id="singleBillForm" class="form" style="background:var(--bg-color); padding:10px; border-radius:5px; margin-bottom:10px;">
             <div class="grid" style="grid-template-columns: 2fr 1fr; gap:5px;">
-                <input name="name" placeholder="Nome da Conta Avulsa" required>
-                <input name="amount" type="number" step="0.01" placeholder="Valor" required>
+                <input name="name" class="input" placeholder="Nome da Conta Avulsa" required>
+                <input name="amount" type="number" step="0.01" class="input" placeholder="Valor" required>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
                 <div style="display:flex; align-items:center; gap:5px;">
                     <span class="small">Vencimento:</span>
-                    <input name="dueDate" type="date" required style="flex:1;">
+                    <input name="dueDate" type="date" class="input" required style="flex:1;">
                 </div>
-                <select name="currency">
+                <select name="currency" class="select">
                     <option value="BRL" selected>BRL</option>
                     <option value="USD">USD</option>
                 </select>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                <select name="categoryId" id="singleCat" required>
+                <select name="categoryId" id="singleCat" class="select" required>
                     <option value="">Categoria...</option>
                     ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
                 </select>
-                <select name="subcategoryId" id="singleSubCat">
+                <select name="subcategoryId" id="singleSubCat" class="select">
                     <option value="">Subcategoria...</option>
                 </select>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                <select name="personId">
+                <select name="personId" class="select">
                     <option value="">Pessoa (Opcional)</option>
                     ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
                 </select>
-                <input name="tags" placeholder="Tags (separadas por vírgula)">
+                <input name="tags" class="input" placeholder="Tags (separadas por vírgula)">
             </div>
 
             <div style="margin-top:10px; font-weight:bold; font-size:0.9em;">Default "Pagar Via" (Opcional):</div>
@@ -990,8 +990,8 @@ function renderSingleBillForm(categories, subcategories, people, accounts, cards
             </div>
 
             <div style="display:flex; gap:10px; margin-top:10px;">
-                <button type="submit" style="flex:1; background:#28a745;">Salvar Conta Avulsa</button>
-                <button type="button" id="btnCancelSingleBill" style="flex:1; background:#ccc; color:black;">Cancelar</button>
+                <button type="submit" class="btn btn-success" style="flex:1;">Salvar Conta Avulsa</button>
+                <button type="button" id="btnCancelSingleBill" class="btn btn-ghost" style="flex:1;">Cancelar</button>
             </div>
         </form>
     `;
@@ -1009,21 +1009,21 @@ function renderTemplateForm(tmpl, categories, subcategories, people, accounts, c
                     <input type="hidden" name="id" value="${tmpl.id || ''}">
 
                         <div class="grid" style="grid-template-columns: 2fr 1fr; gap:10px;">
-                            <input name="name" placeholder="Nome (ex: Aluguel)" value="${esc(tmpl.name || '')}" required>
-                            <input name="amount" type="number" step="0.01" placeholder="Valor" value="${tmpl.amount || ''}" required>
+                            <input name="name" class="input" placeholder="Nome (ex: Aluguel)" value="${esc(tmpl.name || '')}" required>
+                            <input name="amount" class="input" type="number" step="0.01" placeholder="Valor" value="${tmpl.amount || ''}" required>
                         </div>
 
                         <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
                             <div>
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <span class="small font-weight-bold">Vence dia:</span>
-                                    <input name="dueDay" type="number" min="1" max="31" value="${tmpl.dueDay || '10'}" required style="width:60px;">
+                                    <input name="dueDay" type="number" class="input" min="1" max="31" value="${tmpl.dueDay || '10'}" required style="width:60px;">
                                 </div>
                                 <div class="small text-muted" style="margin-top:2px; font-size:0.75em;">Dia 1-28 evita problemas em Fev.</div>
                             </div>
                             <div>
                                 <span class="small font-weight-bold">Moeda:</span>
-                                <select name="currency" style="width:100%;">
+                                <select name="currency" class="select" style="width:100%;">
                                     <option value="BRL" ${tmpl.currency === 'BRL' ? 'selected' : ''}>BRL</option>
                                     <option value="USD" ${tmpl.currency === 'USD' ? 'selected' : ''}>USD</option>
                                 </select>
@@ -1031,21 +1031,21 @@ function renderTemplateForm(tmpl, categories, subcategories, people, accounts, c
                         </div>
 
                         <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-                            <select name="categoryId" id="tmplCategory" required>
+                            <select name="categoryId" id="tmplCategory" class="select" required>
                                 <option value="">Categoria...</option>
                                 ${categories.map(c => `<option value="${c.id}" ${tmpl.categoryId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
                             </select>
-                            <select name="subcategoryId" id="tmplSubcategory">
+                            <select name="subcategoryId" class="select" id="tmplSubcategory">
                                 <option value="">Subcategoria...</option>
                             </select>
                         </div>
 
                         <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-                            <select name="personId">
+                            <select name="personId" class="select">
                                 <option value="">Pessoa (Opcional)</option>
                                 ${people.map(p => `<option value="${p.id}" ${tmpl.personId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                             </select>
-                            <input name="tags" placeholder="Tags (separadas por vírgula)" value="${esc((tmpl.tags || []).join(', '))}">
+                            <input name="tags" class="input" placeholder="Tags (separadas por vírgula)" value="${esc((tmpl.tags || []).join(', '))}">
                         </div>
 
                         <div style="margin-top:10px;">
@@ -1085,8 +1085,8 @@ function renderTemplateForm(tmpl, categories, subcategories, people, accounts, c
                         </div>
 
                         <div style="display:flex; gap:10px; margin-top:15px;">
-                            <button type="submit" style="flex:1; background:#007bff; font-weight:bold;">Salvar</button>
-                            <button type="button" id="btnCancelTemplate" style="flex:1; background:#ccc; color:black;">Cancelar</button>
+                            <button type="submit" class="btn btn-primary" style="flex:1;">Salvar</button>
+                            <button type="button" id="btnCancelTemplate" class="btn btn-ghost" style="flex:1;">Cancelar</button>
                         </div>
                     </form>`;
 }
@@ -1094,54 +1094,54 @@ function renderTemplateForm(tmpl, categories, subcategories, people, accounts, c
 function renderPlanForm(plan, categories, subcategories, people, accounts, cards) {
     const isNew = !plan.id;
     return `
-                <form id="planForm" class="form" style="background:#e0f7fa; padding:10px; border-radius:5px; margin-bottom:10px;">
+                <form id="planForm" class="form" style="background:var(--bg-color); padding:10px; border-radius:5px; margin-bottom:10px;">
                     <div style="font-weight:bold; margin-bottom:5px; color:#006064;">${isNew ? 'Novo Plano Parcelado' : 'Editar Plano'}</div>
                     <input type="hidden" name="id" value="${plan.id || ''}">
 
                     <div class="grid" style="grid-template-columns: 2fr 1fr; gap:5px;">
-                        <input name="name" placeholder="Nome (ex: IPVA 2026)" value="${esc(plan.name || '')}" required>
-                        <input name="amount" type="number" step="0.01" placeholder="Valor/Parc." value="${plan.amount || ''}" required>
+                        <input name="name" class="input" placeholder="Nome (ex: IPVA 2026)" value="${esc(plan.name || '')}" required>
+                        <input name="amount" type="number" step="0.01" class="input" placeholder="Valor/Parc." value="${plan.amount || ''}" required>
                     </div>
 
                     <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap:5px; margin-top:5px;">
                         <div>
                             <span class="small">Parcelas (N):</span>
-                            <input name="totalInstallments" type="number" min="2" max="120" value="${plan.totalInstallments || '3'}" required style="width:100%;">
+                            <input name="totalInstallments" class="input" type="number" min="2" max="120" value="${plan.totalInstallments || '3'}" required style="width:100%;">
                         </div>
                         <div>
                             <span class="small">Mês Início:</span>
-                            <input name="startMonth" type="month" value="${plan.startMonth || currentMonth}" required style="width:100%;">
+                            <input name="startMonth" type="month" class="input" value="${plan.startMonth || currentMonth}" required style="width:100%;">
                         </div>
                         <div>
                             <span class="small">Vence dia:</span>
-                            <input name="dueDay" type="number" min="1" max="31" value="${plan.dueDay || '10'}" required style="width:100%;">
+                            <input name="dueDay" type="number" class="input" min="1" max="31" value="${plan.dueDay || '10'}" required style="width:100%;">
                         </div>
                     </div>
 
                     <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                        <select name="currency">
+                        <select name="currency" class="select">
                             <option value="BRL" ${plan.currency === 'BRL' ? 'selected' : ''}>BRL</option>
                             <option value="USD" ${plan.currency === 'USD' ? 'selected' : ''}>USD</option>
                         </select>
-                        <select name="categoryId" id="planCategory" required>
+                        <select name="categoryId" id="planCategory" class="select" required>
                             <option value="">Categoria...</option>
                             ${categories.map(c => `<option value="${c.id}" ${plan.categoryId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
                         </select>
                     </div>
 
                     <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                        <select name="subcategoryId" id="planSubcategory">
+                        <select name="subcategoryId" id="planSubcategory" class="select">
                             <option value="">Subcategoria...</option>
                             <!-- Populated via JS -->
                         </select>
-                        <select name="personId">
+                        <select name="personId" class="select">
                             <option value="">Pessoa (Opcional)</option>
                             ${people.map(p => `<option value="${p.id}" ${plan.personId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                         </select>
                     </div>
 
                     <div style="margin-top:5px;">
-                        <input name="tags" placeholder="Tags (separadas por vírgula)" value="${esc((plan.tags || []).join(', '))}" style="width:100%;">
+                        <input name="tags" class="input" placeholder="Tags (separadas por vírgula)" value="${esc((plan.tags || []).join(', '))}" style="width:100%;">
                     </div>
 
                     <div style="margin-top:10px; font-weight:bold; font-size:0.9em;">Default "Pagar Via":</div>
@@ -1186,8 +1186,8 @@ function renderPlanForm(plan, categories, subcategories, people, accounts, cards
                     </div>` : ''}
 
                     <div style="display:flex; gap:10px; margin-top:10px;">
-                        <button type="submit" style="flex:1; background:#17a2b8;">Salvar Plano</button>
-                        <button type="button" id="btnCancelPlan" style="flex:1; background:#ccc; color:black;">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" style="flex:1;">Salvar Plano</button>
+                        <button type="button" id="btnCancelPlan" class="btn btn-ghost" style="flex:1;">Cancelar</button>
                     </div>
                 </form>`;
 }
@@ -1406,7 +1406,7 @@ export function wireBillsHandlers(rootEl) {
                 await put("bills", b);
             }));
 
-            alert(`${toPay.length} conta(s) marcada(s) como paga(s).`);
+            showToast("success", `${toPay.length} conta(s) marcada(s) como paga(s).`);
             refresh();
         });
     }
@@ -1428,7 +1428,7 @@ export function wireBillsHandlers(rootEl) {
                 await put("bills", b);
             }));
 
-            alert(`${toReopen.length} conta(s) reaberta(s).`);
+            showToast("success", `${toReopen.length} conta(s) reaberta(s).`);
             refresh();
         });
     }
@@ -1682,6 +1682,32 @@ export function wireBillsHandlers(rootEl) {
             }
         }
 
+        const btnNewTmpl = e.target.closest("#btnNewTmpl");
+        if (btnNewTmpl) {
+            _state.showTemplateForm = true;
+            _state.editingTemplate = null;
+            refresh();
+            return;
+        }
+
+        const btnEmptyNew = e.target.closest("#btnEmptyNew");
+        if (btnEmptyNew) {
+            _state.currentTab = 'templates';
+            _state.showTemplateForm = true;
+            _state.editingTemplate = null;
+            refresh();
+            return;
+        }
+
+        const btnEmptyGenerate = e.target.closest("#btnEmptyGenerate");
+        if (btnEmptyGenerate) {
+            if (_state.currentTab !== 'month') {
+                _state.currentTab = 'month';
+            }
+            await prepareGeneratePreview();
+            return;
+        }
+
         if (btnDupTmpl) {
             const id = btnDupTmpl.dataset.id;
             const t = await get("bill_templates", id);
@@ -1712,7 +1738,7 @@ export function wireBillsHandlers(rootEl) {
                 window.scrollTo({ top: 0, behavior: 'smooth' }); // Scroll to where form is
                 refresh();
             } else {
-                alert("O Template associado a esta conta não foi encontrado (foi excluído?).");
+                showToast("warning", "O Fixo associado a esta conta não foi encontrado (foi excluído?).");
             }
         }
 
@@ -2101,10 +2127,10 @@ export function wireBillsHandlers(rootEl) {
                 }
             }
 
-            const diag = document.getElementById("genMonthPreviewDialog");
-            if (diag) diag.close();
+            // Hide dialog
+            document.getElementById("genMonthPreviewDialog").close();
 
-            alert(`Resumo (Mês: ${currentMonth}):\n\nCriadas: ${created}\nAtualizadas: ${updated}\nIgnoradas / Já Existiam: ${ignored}`);
+            showToast("success", `Resumo (${currentMonth}): ${created} criadas, ${updated} atualizadas, ${ignored} ignoradas/existentes.`);
             refresh();
             return;
         }
@@ -2249,7 +2275,7 @@ export function wireBillsHandlers(rootEl) {
             count++;
         }
 
-        alert(`Geradas: ${count} parcelas.\nJá existiam: ${existed}`);
+        showToast("success", `Geradas: ${count} parcelas. Já existiam: ${existed}`);
         refresh();
     });
 
@@ -2261,7 +2287,7 @@ export function wireBillsHandlers(rootEl) {
             const active = templates.filter(t => t.active !== false);
 
             if (active.length === 0) {
-                alert("Nenhuma recorrência ativa encontrada para gerar contas.");
+                showToast("warning", "Nenhuma recorrência ativa encontrada para gerar contas.");
                 return;
             }
 
@@ -2317,7 +2343,7 @@ export function wireBillsHandlers(rootEl) {
                 count++;
             }
 
-            alert(`Geradas: ${count}\nJá existiam: ${existed}`);
+            showToast("success", `Geradas: ${count} contas. Já existiam: ${existed}`);
             refresh();
         });
     }
@@ -2416,7 +2442,7 @@ export function wireBillsHandlers(rootEl) {
             const payVal = parseFloat(fd.get("payVal"));
 
             if (isNaN(payVal) || payVal <= 0) {
-                alert("Valor pago inválido.");
+                showToast("error", "Valor pago inválido.");
                 return;
             }
 
@@ -2463,8 +2489,10 @@ export function wireBillsHandlers(rootEl) {
 
             if (method === "account") {
                 const accId = fd.get("accountId");
-                if (!accId) return alert("Selecione a conta.");
-
+                if (!accId) {
+                    showToast("error", "Selecione a conta.");
+                    return;
+                }
                 updates.paidViaType = "account";
                 updates.paidViaId = accId;
                 const accounts = await list("accounts");
@@ -2493,7 +2521,10 @@ export function wireBillsHandlers(rootEl) {
                 const cardHolder = fd.get("cardHolder");
                 const invoiceMonth = fd.get("invoiceMonth");
 
-                if (!cardId) return alert("Selecione o cartão.");
+                if (!cardId) {
+                    showToast("error", "Selecione o cartão.");
+                    return;
+                }
 
                 updates.paidViaType = "card";
                 updates.paidViaId = cardId;
@@ -2503,8 +2534,9 @@ export function wireBillsHandlers(rootEl) {
 
                 // Currency check (Req E)
                 let finalCurrency = bill.currency;
-                if (card && card.currency !== bill.currency) {
-                    alert(`Aviso: A conta é em ${bill.currency} mas o cartão é ${card.currency}. O valor será lançado como ${bill.amount} ${card.currency}.`);
+                if (bill.currency && card.currency && bill.currency !== card.currency) {
+                    showToast("warning", `Aviso: A conta é em ${bill.currency} mas o cartão é ${card.currency}. O valor será lançado como ${bill.amount} ${card.currency}.`);
+                    await new Promise(r => setTimeout(r, 2000)); // Give user time to read toast
                     finalCurrency = card.currency;
                     valBRL = val; // If card is BRL, assumed 1:1 numeric (or user handles conversion). Req says: "usar currency do cartão e tratar bill.amount como valor nessa moeda"
                 }

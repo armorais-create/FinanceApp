@@ -1,5 +1,6 @@
 import { list, put, remove, uid, get } from "../db.js";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
+import { showToast } from "../ui.js?v=2.0";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -172,10 +173,10 @@ export async function loansScreen() {
                     ${chargesHtml}
                     
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="secondary small" data-action="nav" data-hash="#rejane-report?month=${_filters.additionalMonth}" style="margin-right:10px;">Gerar Relatório (PDF)</button>
+                        <button class="btn btn-secondary small" data-action="nav" data-hash="#rejane-report?month=${_filters.additionalMonth}" style="margin-right:10px;">Gerar Relatório (PDF)</button>
                         ${isClosed ?
-                    '<span class="badge" style="background:#28a745; color:white;">FECHADO</span>' :
-                    `<button class="primary small" data-action="close-rejane" data-month="${_filters.additionalMonth}" data-amount="${totalChargesThisMonth}" data-person="${rejanePerson.id}">Aplicar Fechamento</button>`
+                    '<span class="badge badge-success">FECHADO</span>' :
+                    `<button class="btn btn-primary small" data-action="close-rejane" data-month="${_filters.additionalMonth}" data-amount="${totalChargesThisMonth}" data-person="${rejanePerson.id}">Aplicar Fechamento</button>`
                 }
                     </div>
                 </div>
@@ -183,7 +184,7 @@ export async function loansScreen() {
                 <div style="margin-top:10px; border-top:1px solid #f1c40f; padding-top:10px;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:5px; align-items:center;">
                         <strong style="color:#28a745;">Pagamentos Recebidos no Mês</strong>
-                        <button class="success small" id="btnRejanePayment" data-person="${rejanePerson.id}">+ Receber Pgto</button>
+                        <button class="btn btn-success small" id="btnRejanePayment" data-person="${rejanePerson.id}">+ Receber Pgto</button>
                     </div>
                     ${paymentsThisMonth.length === 0 ? '<div class="small text-muted">Nenhum pagamento registrado.</div>' : ''}
                     <ul class="list" style="margin:0; padding:0;">
@@ -201,11 +202,30 @@ export async function loansScreen() {
             `;
         }
 
+        const renderBreadcrumb = () => `
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+                <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
+                <h2 style="margin:0;">Controle de Dívidas</h2>
+            </div>
+        `;
+
+        if (loans.length === 0) {
+            return `
+            ${renderBreadcrumb()}
+            <div class="card" style="text-align:center; padding: 40px 20px; margin-top:15px;">
+                <div style="font-size:3em; margin-bottom:10px;">🤝</div>
+                <h3>Nenhuma dívida registrada</h3>
+                <p style="color:#666; margin-bottom:20px;">Use esta área para controlar empréstimos e dívidas, tanto as que você deve quanto as que devem a você.</p>
+                <button id="btnNewLoan" class="btn btn-primary">+ Novo Empréstimo</button>
+            </div>
+            `;
+        }
+
         return `
+            ${renderBreadcrumb()}
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="font-weight:bold; font-size:1.1em;">Controle de Dívidas</div>
-                    <button id="btnNewLoan" class="primary">+ Novo</button>
+                    <button id="btnNewLoan" class="btn btn-primary">+ Novo Empréstimo</button>
                 </div>
             </div>
 
@@ -213,9 +233,9 @@ export async function loansScreen() {
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
                     <strong style="color:#0056b3;">Próximos Vencimentos</strong>
                     <div style="display:flex; gap:5px;">
-                        <button class="small ${_filters.upcomingDays === 30 ? 'primary' : 'secondary'}" data-upcoming="30">30d</button>
-                        <button class="small ${_filters.upcomingDays === 60 ? 'primary' : 'secondary'}" data-upcoming="60">60d</button>
-                        <button class="small ${_filters.upcomingDays === 90 ? 'primary' : 'secondary'}" data-upcoming="90">90d</button>
+                        <button class="btn ${_filters.upcomingDays === 30 ? 'btn-primary' : 'btn-secondary'} small" data-upcoming="30">30d</button>
+                        <button class="btn ${_filters.upcomingDays === 60 ? 'btn-primary' : 'btn-secondary'} small" data-upcoming="60">60d</button>
+                        <button class="btn ${_filters.upcomingDays === 90 ? 'btn-primary' : 'btn-secondary'} small" data-upcoming="90">90d</button>
                     </div>
                 </div>
                 ${upcomingInstallments.length === 0 ? '<div class="small text-muted">Nenhum vencimento neste período.</div>' : ''}
@@ -259,8 +279,8 @@ export async function loansScreen() {
 
             <div class="card" style="margin-top:10px;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
-                    <div style="font-weight:bold; color:#0056b3;">Dívidas (${totalFiltered})</div>
-                    <select id="filterView" style="padding:4px; max-width:150px;">
+                    <div style="font-weight:bold; color:#0056b3;">Todas as Dívidas (${totalFiltered})</div>
+                    <select id="filterView" class="select" style="max-width:150px;">
                         <option value="all" ${_filters.view === 'all' ? 'selected' : ''}>Todas</option>
                         <option value="i_owe" ${_filters.view === 'i_owe' ? 'selected' : ''}>Eu Devo</option>
                         <option value="owed_to_me" ${_filters.view === 'owed_to_me' ? 'selected' : ''}>Me Devem</option>
@@ -300,15 +320,15 @@ export async function loansScreen() {
                                 <div style="font-size:0.8em; color:#666;">Já Pago: ${pct}%</div>
                             </div>
                             <div style="display:flex; gap:5px; margin-top:10px;">
-                                    ${l.computedStatus === 'open' ? `<button class="success small" data-action="pay-loan" data-id="${l.id}" style="flex:1;">Pagar/Receber</button>` : ''}
-                                    <button class="primary small" data-action="detail-loan" data-id="${l.id}" style="flex:1;">Detalhes</button>
+                                    ${l.computedStatus === 'open' ? `<button class="btn btn-success small" data-action="pay-loan" data-id="${l.id}" style="flex:1;">Pagar/Receber</button>` : ''}
+                                    <button class="btn btn-primary small" data-action="detail-loan" data-id="${l.id}" style="flex:1;">Detalhes</button>
                                 </div>
                             </div>
                         </li>
                     `}).join('')}
                 </ul>
                 ${totalFiltered > _searchState.limit ? `<div style="text-align:center; padding: 15px;">
-                    <button id="btnLoadMoreLoans" class="secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
+                    <button id="btnLoadMoreLoans" class="btn btn-secondary">Carregar mais (${Math.min(totalFiltered - _searchState.limit, 50)})</button>
                     <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_searchState.limit} de ${totalFiltered}</div>
                  </div>` : ''}
             </div>
@@ -333,24 +353,24 @@ function renderRejanePaymentModal(accounts) {
             <input type="hidden" name="personId" value="${_state.rejanePersonId}">
             
             <label>Data
-                <input type="date" name="date" required value="${new Date().toISOString().slice(0, 10)}">
+                <input type="date" class="input" name="date" required value="${new Date().toISOString().slice(0, 10)}">
             </label>
             <label>Valor Recebido (R$)
-                <input type="number" step="0.01" name="amount" required>
+                <input type="number" class="input" step="0.01" name="amount" required>
             </label>
             <label>Conta destino (Opcional - criará receita)
-                <select name="accountId">
+                <select name="accountId" class="select">
                     <option value="">Nenhuma / Só abater saldo</option>
                     ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
                 </select>
             </label>
             <label>Nota / Obs
-                <input type="text" name="note" placeholder="Ex: PIX recebido no Nubank">
+                <input type="text" class="input" name="note" placeholder="Ex: PIX recebido no Nubank">
             </label>
             
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
-                <button type="button" class="secondary" id="btnCancelRejanePayment">Cancelar</button>
-                <button type="submit" class="primary">Salvar</button>
+                <button type="button" class="btn btn-secondary" id="btnCancelRejanePayment">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
             </div>
         </form>
     </div>
@@ -369,11 +389,11 @@ function renderLoanForm(people) {
             <input type="hidden" name="id" value="${l.id || ''}">
             
             <label>Título / Referência
-                <input type="text" name="title" required value="${esc(l.title || '')}" placeholder="Ex: Empréstimo para reforma">
+                <input type="text" class="input" name="title" required value="${esc(l.title || '')}" placeholder="Ex: Empréstimo para reforma">
             </label>
 
             <label>Origem (Quem deve a quem?)
-                <select name="role" required>
+                <select name="role" class="select" required>
                     <option value="i_owe" ${l.role === 'i_owe' ? 'selected' : ''}>Eu peguei emprestado (Eu Devo)</option>
                     <option value="owed_to_me" ${l.role === 'owed_to_me' ? 'selected' : ''}>Eu emprestei (Me Devem)</option>
                 </select>
@@ -381,13 +401,13 @@ function renderLoanForm(people) {
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <label>Emprestador (Deu a grana)
-                    <select name="lenderPersonId" required>
+                    <select name="lenderPersonId" class="select" required>
                         <option value="">Selecione...</option>
                         ${people.map(p => `<option value="${p.id}" ${l.lenderPersonId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                     </select>
                 </label>
                 <label>Tomador (Pegou a grana)
-                    <select name="borrowerPersonId" required>
+                    <select name="borrowerPersonId" class="select" required>
                         <option value="">Selecione...</option>
                         ${people.map(p => `<option value="${p.id}" ${l.borrowerPersonId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                     </select>
@@ -396,39 +416,39 @@ function renderLoanForm(people) {
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <label>Moeda
-                    <select name="currency" required>
+                    <select name="currency" class="select" required>
                         <option value="BRL" ${l.currency === 'BRL' ? 'selected' : ''}>BRL</option>
                         <option value="USD" ${l.currency === 'USD' ? 'selected' : ''}>USD</option>
                     </select>
                 </label>
                 <label>Valor Original (Principal)
-                    <input type="number" step="0.01" name="principal" required value="${l.principal || ''}">
+                    <input type="number" class="input" step="0.01" name="principal" required value="${l.principal || ''}">
                 </label>
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
                 <label>Nº Parcelas
-                    <input type="number" name="totalInstallments" required value="${l.totalInstallments || 1}" min="1">
+                    <input type="number" class="input" name="totalInstallments" required value="${l.totalInstallments || 1}" min="1">
                 </label>
                 <label>Valor Parcela
-                    <input type="number" step="0.01" name="installmentAmount" value="${l.installmentAmount || ''}">
+                    <input type="number" class="input" step="0.01" name="installmentAmount" value="${l.installmentAmount || ''}">
                 </label>
                 <label>Dia Venc.
-                    <input type="number" name="dueDay" required min="1" max="31" value="${l.dueDay || ''}">
+                    <input type="number" class="input" name="dueDay" required min="1" max="31" value="${l.dueDay || ''}">
                 </label>
             </div>
 
             <label>Data Início
-                <input type="date" name="startDate" required value="${l.startDate || ''}">
+                <input type="date" class="input" name="startDate" required value="${l.startDate || ''}">
             </label>
 
             <label>Notas
-                <textarea name="notes" rows="2">${esc(l.notes || '')}</textarea>
+                <textarea class="input" name="notes" rows="2">${esc(l.notes || '')}</textarea>
             </label>
 
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
-                <button type="button" class="secondary" id="btnCancelLoan">Cancelar</button>
-                <button type="submit" class="primary">Salvar</button>
+                <button type="button" class="btn btn-secondary" id="btnCancelLoan">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
             </div>
         </form>
     </div>
@@ -451,13 +471,13 @@ function renderLoanDetails(loan, people, accounts) {
                     <div class="modal open" id="loanDetailsModal" style="display:block; min-width:320px; max-width:500px;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                             <h3 style="margin-bottom:0;">${esc(loan.title)}</h3>
-                            <button class="small danger" id="btnCancelDetails">Fechar</button>
+                            <button class="btn btn-danger small" id="btnCancelDetails">Fechar</button>
                         </div>
 
                         <div style="background:#f8f9fa; padding:10px; border-radius:5px; margin-top:10px; font-size:0.9em; border-left:4px solid ${badgeColor};">
                             <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                                 <strong>${badgeText} a ${esc(rolePerson)}</strong>
-                                <span class="badge" style="background:${loan.computedStatus === 'closed' ? '#6c757d' : '#17a2b8'}; color:white;">
+                                <span class="badge" style="background:${loan.computedStatus === 'closed' ? 'var(--text-muted)' : 'var(--primary)'}; color:white;">
                                     ${loan.computedStatus.toUpperCase()}
                                 </span>
                             </div>
@@ -474,7 +494,7 @@ function renderLoanDetails(loan, people, accounts) {
                         ${loan.installments.length === 0 ? `
                             <div style="margin-top:15px; padding:10px; background:#fff3cd; border:1px solid #ffeeba; border-radius:5px; text-align:center;">
                                 <div class="small" style="color:#856404; margin-bottom:5px;">Este empréstimo ainda não possui um cronograma de parcelas.</div>
-                                <button class="primary small" id="btnGenerateInstallments" data-id="${loan.id}">Gerar Parcelas (${loan.totalInstallments}x)</button>
+                                <button class="btn btn-primary small" id="btnGenerateInstallments" data-id="${loan.id}">Gerar Parcelas (${loan.totalInstallments}x)</button>
                             </div>
                         ` : `
                             <h4 style="margin-top:15px; border-bottom:1px solid #ccc; padding-bottom:5px;">Cronograma de Parcelas</h4>
@@ -486,11 +506,11 @@ function renderLoanDetails(loan, people, accounts) {
         const rest = Math.max(0, i.amount - (i.paidAmount || 0));
 
         let statusBadge = '';
-        if (isPaid) statusBadge = '<span class="badge" style="background:#28a745; color:white;">PAGA</span>';
-        else if (isSkipped) statusBadge = '<span class="badge" style="background:#6c757d; color:white;">PULOU</span>';
-        else if (i.status === 'partial') statusBadge = '<span class="badge" style="background:#fd7e14; color:white;">PARCIAL</span>';
-        else if (i.dueDate < new Date().toISOString().slice(0, 10)) statusBadge = '<span class="badge" style="background:#dc3545; color:white;">ATRASADA</span>';
-        else statusBadge = '<span class="badge" style="background:#17a2b8; color:white;">ABERTA</span>';
+        if (isPaid) statusBadge = '<span class="badge badge-success">PAGA</span>';
+        else if (isSkipped) statusBadge = '<span class="badge badge-secondary">PULOU</span>';
+        else if (i.status === 'partial') statusBadge = '<span class="badge badge-warning">PARCIAL</span>';
+        else if (i.dueDate < new Date().toISOString().slice(0, 10)) statusBadge = '<span class="badge badge-danger">ATRASADA</span>';
+        else statusBadge = '<span class="badge badge-primary">ABERTA</span>';
 
         return `
                                             <li class="listItem" style="padding:6px; font-size:0.9em; opacity:${isPaid || isSkipped ? '0.6' : '1'};">
@@ -502,8 +522,8 @@ function renderLoanDetails(loan, people, accounts) {
                                                     ${statusBadge}
                                                 </div>
                                                 <div style="display:flex; flex-direction:column; gap:4px; margin-left:10px;">
-                                                    ${i.status !== 'skipped' && i.status !== 'paid' ? `<button class="secondary small" data-action="skip-installment" data-id="${i.id}">Pular</button>` : ''}
-                                                    ${isSkipped ? `<button class="secondary small" data-action="unskip-installment" data-id="${i.id}">Reabrir</button>` : ''}
+                                                    ${i.status !== 'skipped' && i.status !== 'paid' ? `<button class="btn btn-secondary small" data-action="skip-installment" data-id="${i.id}">Pular</button>` : ''}
+                                                    ${isSkipped ? `<button class="btn btn-secondary small" data-action="unskip-installment" data-id="${i.id}">Reabrir</button>` : ''}
                                                 </div>
                                             </li>
                                         `;
@@ -521,22 +541,22 @@ function renderLoanDetails(loan, people, accounts) {
             
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <label class="small">Data
-                    <input type="date" name="date" required value="${new Date().toISOString().slice(0, 10)}" style="padding:4px;">
+                    <input type="date" class="input" name="date" required value="${new Date().toISOString().slice(0, 10)}">
                 </label>
                 <label class="small">Valor Pagamento
-                    <input type="number" step="0.01" name="amount" required value="${loan.saldo > 0 ? loan.saldo.toFixed(2) : ''}" style="padding:4px;">
+                    <input type="number" class="input" step="0.01" name="amount" required value="${loan.saldo > 0 ? loan.saldo.toFixed(2) : ''}">
                 </label>
             </div>
             
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <label class="small">Conta utilizada
-                    <select name="accountId" required style="padding:4px;">
+                    <select name="accountId" class="select" required>
                         <option value="">Selecione...</option>
                         ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
                     </select>
                 </label>
                 <label class="small">Quem pagou?
-                    <select name="personId" required style="padding:4px;">
+                    <select name="personId" class="select" required>
                         <option value="">Selecione...</option>
                         ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
                     </select>
@@ -544,11 +564,11 @@ function renderLoanDetails(loan, people, accounts) {
             </div>
             
             <label class="small">Nota / Referência
-                <input type="text" name="note" placeholder="Opcional" style="padding:4px;">
+                <input type="text" class="input" name="note" placeholder="Opcional">
             </label>
             
             <div style="text-align:right;">
-                <button type="submit" class="primary small">Gravar Pgto</button>
+                <button type="submit" class="btn btn-primary small">Gravar Pgto</button>
             </div>
         </form>
         ` : '<div class="small" style="color:#28a745; font-weight:bold; margin-top:10px;">🎉 Empréstimo/Dívida totalmente quitado!</div>'
@@ -564,7 +584,7 @@ function renderLoanDetails(loan, people, accounts) {
                             <div class="small text-muted">Conta: ${esc(getAccountName(p.accountId))} • Por: ${esc(getPersonName(p.personId))}</div>
                             ${p.note ? `<div class="small" style="font-style:italic">"${esc(p.note)}"</div>` : ''}
                         </div>
-                        <button class="danger small" data-action="delete-payment" data-id="${p.id}">Excluir</button>
+                        <button class="btn btn-danger small" data-action="delete-payment" data-id="${p.id}">Excluir</button>
                     </li>
                 `).join('')}
             </ul>
@@ -644,7 +664,10 @@ export async function wireLoansHandlers(rootEl) {
             e.preventDefault();
             const fd = new FormData(frmRejanePayment);
             const amount = parseFloat(fd.get("amount"));
-            if (amount <= 0) return alert("Valor inválido");
+            if (amount <= 0) {
+                showToast("error", "Valor inválido");
+                return;
+            }
 
             const personId = fd.get("personId");
             const amountCents = Math.round(amount * 100);
@@ -814,7 +837,7 @@ export async function wireLoansHandlers(rootEl) {
             const amount = parseFloat(btnCloseRejane.dataset.amount);
             const personId = btnCloseRejane.dataset.person;
             if (amount <= 0) {
-                alert("Não há gastos para fechar neste mês.");
+                showToast("warning", "Não há gastos para fechar neste mês.");
                 return;
             }
             if (!confirm(`Fechar fatura de ${month} no valor de R$ ${amount.toFixed(2)}?`)) return;
@@ -822,7 +845,7 @@ export async function wireLoansHandlers(rootEl) {
             const allEvents = await list("balance_events");
             const exists = allEvents.some(ev => ev.personId === personId && ev.month === month && ev.type === "charges");
             if (exists) {
-                alert("Este mês já foi fechado e incorporado ao saldo. Use Ajuste se necessário.");
+                showToast("warning", "Este mês já foi fechado e incorporado ao saldo. Use Ajuste se necessário.");
                 return;
             }
 

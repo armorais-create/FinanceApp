@@ -271,39 +271,49 @@ async function renderReports(cnt) {
         <!-- HEADER / FILTERS -->
         <div class="card" style="box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:15px; position:sticky; top:60px; z-index:100;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
-                <h3 style="margin:0; font-size:16px;">Painel / Relatórios</h3>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
+                    <h3 style="margin:0; font-size:16px;">Painel / Relatórios</h3>
+                </div>
                 <div style="display:flex; gap:5px;">
-                    <button id="btnViewDashboard" class="small ${state.filters.viewMode === 'dashboard' ? 'primary' : 'secondary'}">Dash</button>
-                    <button id="btnViewDetails" class="small ${state.filters.viewMode === 'details' ? 'primary' : 'secondary'}">Tabelas</button>
-                    <button onclick="location.hash='#charts-report'" class="small secondary" style="border-color:#17a2b8; color:#17a2b8;">PDF Gráfico</button>
+                    <button id="btnViewDashboard" class="btn small ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-secondary'}">Dash</button>
+                    <button id="btnViewDetails" class="btn small ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-secondary'}">Tabelas</button>
+                    <button onclick="location.hash='#charts-report'" class="btn btn-outline small">PDF Gráfico</button>
                 </div>
             </div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <input type="month" id="repMonth" value="${dateInputVal}" style="padding:5px;">
-                <button id="btnToday" style="padding:5px 10px;">Hoje</button>
-                <button id="btnClear" style="padding:5px 10px; background:#ccc; color:#333;">Limpar</button>
+                <input type="month" id="repMonth" class="input" value="${dateInputVal}">
+                <button id="btnToday" class="btn btn-secondary small">Hoje</button>
+                <button id="btnClear" class="btn btn-secondary small">Limpar</button>
             </div>
             <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:5px; margin-top:10px;">
-                <select id="fltPerson">${pOpts}</select>
-                <select id="fltAccount">${acOpts}</select>
-                <select id="fltCard">${cardOpts}</select>
-                <select id="fltHolder">${hOpts}</select>
+                <select id="fltPerson" class="select">${pOpts}</select>
+                <select id="fltAccount" class="select">${acOpts}</select>
+                <select id="fltCard" class="select">${cardOpts}</select>
+                <select id="fltHolder" class="select">${hOpts}</select>
             </div>
             ${quickFilterLabel}
         </div>
 
-        </div>
-
+        ${displayTxs.length === 0 ? `
+            <div class="card" style="text-align:center; padding: 40px 20px; margin-top:15px;">
+                <div style="font-size:3em; margin-bottom:10px;">📊</div>
+                <h3>Sem dados para este período</h3>
+                <p style="color:#666; margin-bottom:20px;">Não encontramos lançamentos para os filtros e mês selecionados. Adicione novos lançamentos e retorne para visualizar os gráficos.</p>
+                <button class="btn btn-primary" onclick="location.hash='#tx'">Novo Lançamento</button>
+            </div>
+        ` : `
         <!-- VIEW TOGGLE -->
         <div style="display:flex; justify-content:center; gap:10px; margin-top:15px; margin-bottom: 10px;">
-             <button id="btnViewDashboard" class="btn ${state.filters.viewMode === 'dashboard' ? 'active-view-btn' : 'inactive-view-btn'}" style="flex:1; padding:8px; border-radius:5px; border:1px solid #007bff; ${state.filters.viewMode === 'dashboard' ? 'background:#007bff; color:white;' : 'background:transparent; color:#007bff;'}">📊 Painel Geral</button>
-             <button id="btnViewDetails" class="btn ${state.filters.viewMode === 'details' ? 'active-view-btn' : 'inactive-view-btn'}" style="flex:1; padding:8px; border-radius:5px; border:1px solid #007bff; ${state.filters.viewMode === 'details' ? 'background:#007bff; color:white;' : 'background:transparent; color:#007bff;'}">📝 Detalhamento</button>
+             <button id="btnViewDashboard2" class="btn ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-outline'}" style="flex:1;">📊 Painel Geral</button>
+             <button id="btnViewDetails2" class="btn ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-outline'}" style="flex:1;">📝 Detalhamento</button>
         </div>
         
         <div id="reportsContentArea">
             <!-- INJECTED DYNAMICALLY BELOW -->
         </div>
-        
+        `}
+    </div>
     `; // End of main outer HTML
 
     const viewArea = cnt.querySelector("#reportsContentArea");
@@ -311,7 +321,7 @@ async function renderReports(cnt) {
     // --- DASHBOARD VIEW ---
     if (state.filters.viewMode === 'dashboard') {
         const d_html = renderDashboardView(currentTxs, prevTxs, month, state.filters, state.cache, curr, prev);
-        viewArea.innerHTML = d_html;
+        if (viewArea) viewArea.innerHTML = d_html;
 
         // Let bills update asynchronously via timeout
         setTimeout(() => {
@@ -447,15 +457,15 @@ async function renderReports(cnt) {
         refresh();
     };
 
-    cnt.querySelector("#btnViewDashboard").onclick = () => {
+    cnt.querySelectorAll("#btnViewDashboard, #btnViewDashboard2").forEach(b => b.onclick = () => {
         state.filters.viewMode = 'dashboard';
         refresh();
-    };
+    });
 
-    cnt.querySelector("#btnViewDetails").onclick = () => {
+    cnt.querySelectorAll("#btnViewDetails, #btnViewDetails2").forEach(b => b.onclick = () => {
         state.filters.viewMode = 'details';
         refresh();
-    };
+    });
 
     const btnQuick = cnt.querySelector("#btnRemoveQuick");
     if (btnQuick) btnQuick.onclick = () => {
@@ -1162,7 +1172,7 @@ function renderRejaneView(cnt, txs, flt, currentMonth) {
     <div class="card" style="margin-top:10px; border-left:4px solid #f39c12; background:#fffcf5;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <div style="font-weight:bold; color:#d68910;">🌸 Conta Corrente Adicionais: ${esc(rejanePerson.name)}</div>
-            <button class="small secondary" onclick="location.hash='#loans'">Ver Detalhes</button>
+            <button class="btn btn-secondary small" onclick="location.hash='#loans'">Ver Detalhes</button>
         </div>
         
         <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap:5px; text-align:center;">
@@ -1186,8 +1196,8 @@ function renderRejaneView(cnt, txs, flt, currentMonth) {
             </div>
             <div>
                 ${isClosed ?
-            '<span class="badge" style="background:#28a745; color:white;">Mês Fechado ✅</span>' :
-            '<span class="badge" style="background:#6c757d; color:white;">Mês Não Fechado</span>'
+            '<span class="badge badge-success">Mês Fechado ✅</span>' :
+            '<span class="badge badge-secondary">Mês Não Fechado</span>'
         }
             </div>
         </div>
@@ -1752,8 +1762,8 @@ async function renderChecklistView(cnt, currentMonth) {
         </h3>
         <div style="margin-top:10px;">${liHtml}</div>
         <div style="display:flex; gap:10px; margin-top:10px;">
-            <button class="small" onclick="window.__markAllChecklist()" style="flex:1; padding:4px;">Marcar Tudo</button>
-            <button class="small secondary" onclick="window.__clearChecklist()" style="flex:1; padding:4px; background:#e2e6ea; color:#333; border:0;">Limpar</button>
+            <button class="btn btn-secondary small" onclick="window.__markAllChecklist()" style="flex:1;">Marcar Tudo</button>
+            <button class="btn btn-secondary small" onclick="window.__clearChecklist()" style="flex:1;">Limpar</button>
         </div>
     `;
 }

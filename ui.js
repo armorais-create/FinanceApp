@@ -7,6 +7,53 @@ function esc(s) {
     .replaceAll("'", "&#039;");
 }
 
+export async function showToast(type, message) {
+  const container = document.createElement('div');
+  container.className = `toast toast-${type === 'error' ? 'danger' : type}`;
+  container.innerHTML = `<div>${esc(message)}</div>`;
+  document.body.appendChild(container);
+
+  setTimeout(() => {
+    container.style.opacity = '0';
+    container.style.transform = 'translate(-50%, 20px)';
+    container.style.transition = 'all 0.3s ease-out';
+    setTimeout(() => {
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+    }, 300);
+  }, 3500);
+}
+
+export async function prepareExportPack() {
+  try {
+    const data = await exportDB();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    const filename = `FinanceApp_Pack_${yyyy}-${mm}-${dd}_${hh}${mi}.financeapp`;
+
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast("success", "Pack gerado: " + filename + "\n\nNo iPhone: Salve no iCloud Drive.");
+  } catch (e) {
+    showToast("error", "Erro ao exportar pack: " + e.message);
+  }
+}
+
 export async function settingsScreen() {
   try {
     const people = await list("people");
@@ -33,14 +80,14 @@ export async function settingsScreen() {
     <div><strong>Backup & Dados</strong></div>
     <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
         <div style="display:flex; gap:5px;">
-             <button id="btnExport" style="flex:1" class="secondary small">Gerar .json</button>
-             <button id="btnImport" style="flex:1" class="secondary small">Ler .json</button>
+             <button id="btnExport" style="flex:1" class="btn btn-secondary small">Gerar .json</button>
+             <button id="btnImport" style="flex:1" class="btn btn-secondary small">Ler .json</button>
         </div>
         <div style="display:flex; gap:5px;">
-             <button id="btnExportPack" style="flex:1; background:#007bff; color:white;">⚡ Export rápido</button>
-             <button id="btnImportPack" style="flex:1; background:#28a745; color:white;">⚡ Import rápido</button>
+             <button id="btnExportPack" style="flex:1;" class="btn btn-primary small">⚡ Export rápido</button>
+             <button id="btnImportPack" style="flex:1;" class="btn btn-success small">⚡ Import rápido</button>
         </div>
-        <button id="btnReset" class="danger small" style="width:100%">⚠️ Resetar App</button>
+        <button id="btnReset" class="btn btn-danger small" style="width:100%">⚠️ Resetar App</button>
         <input type="file" id="importFile" accept=".json" style="display:none" />
         <input type="file" id="importPackFile" accept=".financeapp,.json" style="display:none" />
     </div>
@@ -56,17 +103,17 @@ export async function settingsScreen() {
              <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="ruleFormTitle">Nova Regra</strong>
                  <div style="display:flex; gap:5px;">
-                     <button type="button" id="btnTestRule" style="padding:2px 8px; font-size:0.8em; background:#17a2b8; color:white; border:none; border-radius:3px; display:none;">🧪 Simular Regra</button>
-                     <button type="button" id="btnCancelEditRule" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar Edição</button>
+                     <button type="button" id="btnTestRule" class="btn btn-primary small" style="display:none;">🧪 Simular Regra</button>
+                     <button type="button" id="btnCancelEditRule" class="btn btn-secondary small" style="display:none;">Cancelar Edição</button>
                  </div>
              </div>
              
              <input type="hidden" name="id" /> <!-- For editing -->
 
              <div class="grid" style="grid-template-columns: 2fr 1fr; gap:5px;">
-                 <input name="name" placeholder="Nome da Regra (ex: Uber)" required />
+                 <input name="name" class="input" placeholder="Nome da Regra (ex: Uber)" required />
                  <div style="display:flex; gap:5px; align-items:center;">
-                    <input name="priority" type="number" placeholder="Prioridade (0=Alta)" style="width:100%" value="10" />
+                    <input name="priority" class="input" type="number" placeholder="Prioridade (0=Alta)" style="width:100%" value="10" />
                     <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; white-space:nowrap;">
                         <input type="checkbox" name="enabled" checked /> Ativa
                     </label>
@@ -76,10 +123,10 @@ export async function settingsScreen() {
              <div style="margin-top:5px; font-weight:bold; font-size:0.9em; border-bottom:1px solid #ddd; padding-bottom:5px;">Condições de Match (Filtros)</div>
              <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
                  <label class="small">Pode conter qualquer (OR):
-                    <input name="ruleAnyIncludes" placeholder="ex: uber, 99pop" style="width:100%" />
+                    <input name="ruleAnyIncludes" class="input" placeholder="ex: uber, 99pop" style="width:100%" />
                  </label>
                  <label class="small">Deve conter TODAS (AND):
-                    <input name="ruleAllIncludes" placeholder="ex: viag, internacional" style="width:100%" />
+                    <input name="ruleAllIncludes" class="input" placeholder="ex: viag, internacional" style="width:100%" />
                  </label>
                  <label class="small">Não pode conter (NOT):
                     <input name="ruleNoneIncludes" placeholder="ex: estorno, cancelado" style="width:100%" />
@@ -243,11 +290,11 @@ export async function settingsScreen() {
             <input type="hidden" name="id" />
             <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="goalTempFormTitle">Nova Meta Recorrente</strong>
-                 <button type="button" id="btnCancelEditGoalTemp" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar</button>
+                 <button type="button" id="btnCancelEditGoalTemp" class="btn btn-secondary small" style="display:none;">Cancelar</button>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <input name="name" placeholder="Nome (ex: Mercado)" required />
+                <input name="name" class="input" placeholder="Nome (ex: Mercado)" required />
                 <div style="display:flex; gap:5px; align-items:center;">
                     <span style="font-size:0.8em">Início:</span>
                     <input name="startMonth" type="month" required value="${new Date().toISOString().slice(0, 7)}" />
@@ -295,7 +342,7 @@ export async function settingsScreen() {
                 <input type="checkbox" name="active" checked /> Meta Ativa
             </label>
 
-            <button type="submit" id="btnSaveGoalTemp" style="margin-top:5px;">Salvar Meta</button>
+            <button type="submit" id="btnSaveGoalTemp" class="btn btn-primary" style="margin-top:5px;">Salvar Meta</button>
         </form>
 
         <div style="margin-top:15px;">
@@ -330,13 +377,13 @@ export async function settingsScreen() {
                             </div>
                             
                             <div style="margin-top:5px; display:flex; gap:5px;">
-                                <button class="small" data-action="new-revision" data-id="${t.id}">📅 Alt. Padrão</button>
-                                <button class="small" data-action="new-override" data-id="${t.id}">✏️ Ajuste Mês</button>
+                                <button class="btn btn-secondary small" data-action="new-revision" data-id="${t.id}">📅 Alt. Padrão</button>
+                                <button class="btn btn-secondary small" data-action="new-override" data-id="${t.id}">✏️ Ajuste Mês</button>
                             </div>
                         </div>
                         <div style="display:flex; gap:5px; align-items:flex-start;">
-                             <button type="button" class="iconBtn" data-action="edit-goal-temp" data-tmpl="${esc(JSON.stringify(t))}" data-crev="${currentT.val}">✎</button>
-                             <button type="button" class="danger iconBtn" data-del="goal_templates:${t.id}">×</button>
+                             <button type="button" class="btn btn-ghost iconBtn" data-action="edit-goal-temp" data-tmpl="${esc(JSON.stringify(t))}" data-crev="${currentT.val}">✎</button>
+                             <button type="button" class="btn btn-danger iconBtn" data-del="goal_templates:${t.id}">×</button>
                         </div>
                     </li>
                     `;
@@ -353,16 +400,16 @@ export async function settingsScreen() {
         
         <form id="rateForm" class="form flex" style="align-items:flex-end; gap:10px; margin-bottom:15px; display:flex;">
             <label style="flex:1">Taxa Global do Sistema
-                <input type="number" step="0.0001" name="usdRate" placeholder="Ex: 5.50" value="${settings.usdRate || ''}" required style="width:100%"/>
+                <input type="number" step="0.0001" name="usdRate" class="input" placeholder="Ex: 5.50" value="${settings.usdRate || ''}" required style="width:100%"/>
             </label>
-            <button type="submit" style="white-space:nowrap; height:32px;">Atualizar Taxa</button>
+            <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Atualizar Taxa</button>
         </form>
 
         <div style="background:#f9f9f9; padding:10px; border-radius:4px; font-size:11px;">
             <div style="font-weight:bold; margin-bottom:5px;">Processamento em Lote:</div>
             <div style="display:flex; gap:5px; flex-wrap:wrap;">
-                <button type="button" id="btnRecalcSelected" style="background:#6c757d; font-size:11px; padding:5px 10px;">Recalcular USD (Avançado)...</button>
-                <button type="button" id="recalcBtn" class="danger" style="font-size:11px; padding:5px 10px;">Forçar TODOS (Preservando fixos)</button>
+                <button type="button" id="btnRecalcSelected" class="btn btn-secondary small">Recalcular USD (Avançado)...</button>
+                <button type="button" id="recalcBtn" class="btn btn-danger small">Forçar TODOS (Preservando fixos)</button>
             </div>
             <div class="small" style="margin-top:5px; color:#555;">Recalcula o campo "valueBRL" invisível em todas as despesas internacionais passadas.</div>
         </div>
@@ -371,15 +418,15 @@ export async function settingsScreen() {
             <h3>Auditoria de Recálculo USD</h3>
             <div class="form" id="recalcFormArea">
                 <label>Mês Referência (YYYY-MM)
-                    <input type="month" id="recalcMonth" value="${new Date().toISOString().substring(0, 7)}" style="width:100%" />
+                    <input type="month" id="recalcMonth" class="input" value="${new Date().toISOString().substring(0, 7)}" style="width:100%" />
                 </label>
                 <label style="display:flex; align-items:flex-start; gap:5px; font-size:11px; margin-top:10px; color:#444;">
                     <input type="checkbox" id="recalcPreserveFx" checked />
                     Ignorar registros que já possuem "Taxa de Câmbio" congelada (Recomendado).
                 </label>
                 <div style="display:flex; gap:10px; margin-top:15px; justify-content:flex-end;">
-                    <button type="button" id="btnCancelRecalc" style="background:#ccc;">Cancelar</button>
-                    <button type="button" id="btnPreviewRecalc" style="background:#17a2b8;">Gerar Preview</button>
+                    <button type="button" id="btnCancelRecalc" class="btn btn-secondary small">Cancelar</button>
+                    <button type="button" id="btnPreviewRecalc" class="btn btn-primary small">Gerar Preview</button>
                 </div>
             </div>
             
@@ -405,8 +452,8 @@ export async function settingsScreen() {
                 <div id="recalcLimitWarning" class="small" style="color:orange; margin-top:5px; display:none;">Exibindo apenas os primeiros 50 itens. O cálculo total inclui todos os registros.</div>
                 
                 <div style="display:flex; gap:10px; margin-top:15px; justify-content:flex-end;">
-                    <button type="button" id="btnBackToForm" style="background:#ccc;">Voltar</button>
-                    <button type="button" id="btnConfirmRecalc" style="background:#28a745; font-weight:bold;">Aplicar Recálculo</button>
+                    <button type="button" id="btnBackToForm" class="btn btn-secondary small">Voltar</button>
+                    <button type="button" id="btnConfirmRecalc" class="btn btn-success small">Aplicar Recálculo</button>
                 </div>
             </div>
         </div>
@@ -487,29 +534,29 @@ export async function settingsScreen() {
             <input type="hidden" name="id" />
             <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="budgetTempFormTitle">Novo Orçamento</strong>
-                 <button type="button" id="btnCancelEditBudget" style="display:none; padding:2px 8px; font-size:0.8em; background:#ccc; border:none; border-radius:3px;">Cancelar</button>
+                 <button type="button" id="btnCancelEditBudget" class="btn btn-secondary small" style="display:none;">Cancelar</button>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <input name="name" placeholder="Nome (ex: Supermercado)" required />
+                <input name="name" class="input" placeholder="Nome (ex: Supermercado)" required />
                 <div style="display:flex; gap:5px; align-items:center;">
                     <span style="font-size:0.9em">R$ Mensal Padrão</span>
-                    <input name="monthlyTarget" type="number" step="0.01" placeholder="Ex: 1500.00" required />
+                    <input name="monthlyTarget" class="input" type="number" step="0.01" placeholder="Ex: 1500.00" required />
                 </div>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                <select name="categoryId" id="budgetTempCategory" required>
+                <select name="categoryId" id="budgetTempCategory" class="select" required>
                     <option value="">Selecione Categoria...</option>
                     ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                 </select>
-                <select name="subcategoryId" id="budgetTempSubcategory" disabled>
+                <select name="subcategoryId" id="budgetTempSubcategory" class="select" disabled>
                     <option value="">(Todas Subcategorias)</option>
                 </select>
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr; gap:5px; margin-top:5px;">
-                <select name="personId">
+                <select name="personId" class="select">
                     <option value="">(Qualquer Pessoa)</option>
                     ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
                 </select>
@@ -518,7 +565,7 @@ export async function settingsScreen() {
             <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
                 <input type="checkbox" name="active" checked /> Ativo
             </label>
-            <button type="submit" id="btnSaveBudget" style="margin-top:5px;">Salvar Orçamento</button>
+            <button type="submit" id="btnSaveBudget" class="btn btn-primary" style="margin-top:5px;">Salvar Orçamento</button>
         </form>
 
         <div style="margin-top:15px;">
@@ -547,12 +594,12 @@ export async function settingsScreen() {
                             <div class="small" style="color:#999; margin-top:2px;">(Padrão Mensal: R$ ${(t.monthlyTargetCents / 100).toFixed(2)})</div>
                             
                             <div style="margin-top:5px;">
-                                <button type="button" class="small" data-action="open-budget-details" data-id="${t.id}" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:3px;">🔍 Ver Detalhes / Ajustes</button>
+                                <button type="button" class="btn btn-primary small" data-action="open-budget-details" data-id="${t.id}">🔍 Ver Detalhes / Ajustes</button>
                             </div>
                         </div>
                         <div style="display:flex; gap:5px; align-items:flex-start;">
-                             <button type="button" class="iconBtn" data-action="edit-budget-temp" data-tmpl="${esc(JSON.stringify(t))}">✎</button>
-                             <button type="button" class="danger iconBtn" data-del="budget_templates:${t.id}">×</button>
+                             <button type="button" class="btn btn-ghost iconBtn" data-action="edit-budget-temp" data-tmpl="${esc(JSON.stringify(t))}">✎</button>
+                             <button type="button" class="btn btn-danger iconBtn" data-del="budget_templates:${t.id}">×</button>
                         </div>
                     </li>
       `;
@@ -577,8 +624,8 @@ export async function settingsScreen() {
   <div class="card">
     <div><strong>Pessoas</strong></div>
     <form id="personForm" class="form">
-      <input name="name" placeholder="Nome (ex: André)" required />
-      <button type="submit">Adicionar</button>
+      <input name="name" class="input" placeholder="Nome" required />
+      <button type="submit" class="btn btn-primary">Adicionar</button>
     </form>
     <div class="small">Cadastradas: ${people.length}</div>
     ${renderList("people", people, p => `${esc(p.name)}`)}
@@ -592,7 +639,7 @@ export async function settingsScreen() {
         <option value="BRL">BRL</option>
         <option value="USD">USD</option>
       </select>
-      <button type="submit">Adicionar</button>
+      <button type="submit" class="btn btn-primary">Adicionar</button>
     </form>
     <div class="small">Cadastradas: ${accounts.length}</div>
     ${renderList("accounts", accounts, a => `${esc(a.name)} <span class="small">(${esc(a.currency)})</span>`)}
@@ -619,7 +666,7 @@ export async function settingsScreen() {
         <option value="">Conta Padrão Adicional...</option>
         ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
       </select>
-      <button type="submit">Adicionar</button>
+      <button type="submit" class="btn btn-primary">Adicionar</button>
     </form>
     <div class="small">Cadastrados: ${cards.length}</div>
     ${renderList("cards", cards, c => `
@@ -640,8 +687,8 @@ export async function settingsScreen() {
          <p>Seus dados locais parecem estar em uma versão antiga ou corrompida.</p>
          <pre style="background:#eee; padding:5px; font-size:0.8em">${err.message}</pre>
          <div style="display:flex; gap:10px; margin-top:15px;">
-             <button onclick="location.reload()">Tentar corrigir (Recarregar)</button>
-             <button id="btnForceReset" class="danger">Resetar Banco (Apagar Tudo)</button>
+             <button class="btn btn-primary" onclick="location.reload()">Tentar corrigir (Recarregar)</button>
+             <button id="btnForceReset" class="btn btn-danger">Resetar Banco (Apagar Tudo)</button>
          </div>
       </div>
       `;
@@ -655,7 +702,7 @@ function renderList(store, items, renderFn) {
       ${items.map(i => `
         <li class="listItem">
           <div>${renderFn(i)}</div>
-          <button type="button" class="danger" data-del="${store}:${i.id}">Excluir</button>
+          <button type="button" class="btn btn-danger small" data-del="${store}:${i.id}">Excluir</button>
         </li>
       `).join("")}
     </ul>
@@ -679,7 +726,7 @@ export async function wireSettingsHandlers(rootEl) {
       if (confirm("Isso limpará as preferências de interface salvas e recarregará o aplicativo. Útil se alguma tela estiver travada. Continuar?")) {
         localStorage.clear();
         sessionStorage.clear();
-        alert("Preferências limpas. O app será reiniciado.");
+        showToast("success", "Preferências limpas. O app será reiniciado.");
         location.hash = "#home";
         location.reload();
       }
@@ -693,34 +740,7 @@ export async function wireSettingsHandlers(rootEl) {
   }
 
   if (btnExportPack) {
-    btnExportPack.onclick = async () => {
-      try {
-        const data = await exportDB();
-        const json = JSON.stringify(data, null, 2);
-        const blob = new Blob([json], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
-        const now = new Date();
-        const yyyy = now.getFullYear();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const hh = String(now.getHours()).padStart(2, '0');
-        const mi = String(now.getMinutes()).padStart(2, '0');
-        const filename = `FinanceApp_Pack_${yyyy}-${mm}-${dd}_${hh}${mi}.financeapp`;
-
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        alert("Pack gerado: " + filename + "\n\nNo iPhone: Salve em 'Arquivos > iCloud Drive > FinanceApp' para sincronizar com 1-clique depois.");
-      } catch (e) {
-        alert("Erro ao exportar pack: " + e.message);
-      }
-    };
+    btnExportPack.onclick = prepareExportPack;
   }
 
   if (btnImportPack) {
@@ -734,13 +754,13 @@ export async function wireSettingsHandlers(rootEl) {
       try {
         json = JSON.parse(text);
       } catch (err) {
-        alert("Não consegui ler este arquivo. Ele pode estar corrompido ou não ser do FinanceApp.");
+        showToast("error", "Não consegui ler este arquivo. Ele pode estar corrompido ou não ser do FinanceApp.");
         importPackFile.value = "";
         return;
       }
 
       if (json.meta && json.meta.appId !== "financeapp") {
-        alert("Este arquivo não é um backup válido do FinanceApp.");
+        showToast("error", "Este arquivo não é um backup válido do FinanceApp.");
         importPackFile.value = "";
         return;
       }
@@ -774,18 +794,18 @@ export async function wireSettingsHandlers(rootEl) {
 
         try {
           await importDB(json, true);
-          alert("⚡ Pack restaurado com sucesso!\nO app será recarregado.");
+          showToast("success", "⚡ Pack restaurado com sucesso!\nO app será recarregado.");
           location.hash = "#home";
           location.reload();
         } catch (err) {
-          alert(err.message);
+          showToast("error", err.message);
         } finally {
           btnImportPack.disabled = false;
           btnImportPack.innerText = "⚡ Import rápido";
           importPackFile.value = "";
         }
       } catch (err) {
-        alert(`Erro na leitura do Pack:\n${err.message}`);
+        showToast("error", `Erro na leitura do Pack:\n${err.message}`);
         importPackFile.value = "";
       }
     };
@@ -816,9 +836,9 @@ export async function wireSettingsHandlers(rootEl) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        alert("Backup gerado: " + filename + "\n\nNo iPhone: Salve em 'Arquivos > iCloud Drive > FinanceApp' para sincronizar.");
+        showToast("success", "Backup gerado: " + filename + "\n\nNo iPhone: Salve em 'Arquivos > iCloud Drive > FinanceApp' para sincronizar.");
       } catch (e) {
-        alert("Erro ao exportar: " + e.message);
+        showToast("error", "Erro ao exportar: " + e.message);
       }
     };
   }
@@ -831,7 +851,7 @@ export async function wireSettingsHandlers(rootEl) {
 
       // A) Validar extensão/tipo
       if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
-        alert("Este arquivo não parece um backup (.json) do FinanceApp.\n\nSelecione o arquivo exportado em Config > Exportar.");
+        showToast("error", "Este arquivo não parece um backup (.json) do FinanceApp.\n\nSelecione o arquivo exportado em Config > Exportar.");
         fileInput.value = "";
         return;
       }
@@ -842,14 +862,14 @@ export async function wireSettingsHandlers(rootEl) {
         json = JSON.parse(text);
       } catch (err) {
         // B) Validar JSON
-        alert("Não consegui ler este arquivo como JSON.\n\nEle pode estar corrompido ou não ser um backup do FinanceApp (ex.: CSV/OFX).\nTente exportar novamente em Config > Exportar e selecione o .json gerado.");
+        showToast("error", "Não consegui ler este arquivo como JSON.\n\nEle pode estar corrompido ou não ser um backup do FinanceApp (ex.: CSV/OFX).\nTente exportar novamente em Config > Exportar e selecione o .json gerado.");
         fileInput.value = "";
         return;
       }
 
       // 1.1) Validação Rápida de App (Se tiver meta, mas for outro app, rejeita logo)
       if (json.meta && json.meta.appId && json.meta.appId !== "financeapp") {
-        alert("Este arquivo não é um backup do FinanceApp (parece ser de outro app).\nExporte novamente em Config > Exportar e selecione o .json gerado.");
+        showToast("error", "Este arquivo não é um backup do FinanceApp (parece ser de outro app).\nExporte novamente em Config > Exportar e selecione o .json gerado.");
         fileInput.value = "";
         return;
       }
@@ -887,12 +907,12 @@ export async function wireSettingsHandlers(rootEl) {
           // 1.4) Call importDB with original JSON
           await importDB(json, true);
 
-          alert("Backup importado com sucesso.\nO app será recarregado agora.");
+          showToast("success", "Backup importado com sucesso.\nO app será recarregado agora.");
           location.hash = "#home";
           location.reload();
         } catch (err) {
           // 1.5) Show friendly error from db.js directly
-          alert(err.message);
+          showToast("error", err.message);
         } finally {
           // Reset UI
           btnImport.disabled = false;
@@ -901,7 +921,7 @@ export async function wireSettingsHandlers(rootEl) {
         }
 
       } catch (err) {
-        alert(`Erro na pré-validação:\n${err.message}`);
+        showToast("error", `Erro na pré-validação:\n${err.message}`);
         fileInput.value = "";
       }
     };
@@ -911,7 +931,7 @@ export async function wireSettingsHandlers(rootEl) {
     btnReset.onclick = async () => {
       if (confirm("TEM CERTEZA? Isso apagará TODOS os dados do app permanentemente.") && confirm("Confirmação final: APAGAR TUDO?")) {
         await resetDB();
-        alert("App resetado. Recarregando...");
+        showToast("success", "App resetado. Recarregando...");
         location.reload();
       }
     };
@@ -934,7 +954,7 @@ export async function wireSettingsHandlers(rootEl) {
     if (!usdRate) return;
     await put("settings", { id: "config", usdRate });
     await refreshSettings(rootEl);
-    alert("Taxa Global de Câmbio atualizada com sucesso!");
+    showToast("success", "Taxa Global de Câmbio atualizada com sucesso!");
   });
 
   const btnRecalcSel = rootEl.querySelector("#btnRecalcSelected");
@@ -972,10 +992,10 @@ export async function wireSettingsHandlers(rootEl) {
     btnPreview.onclick = async () => {
       const m = rootEl.querySelector("#recalcMonth").value;
       const preserve = rootEl.querySelector("#recalcPreserveFx").checked;
-      if (!m) return alert("Selecione um mês válido.");
+      if (!m) return showToast("error", "Selecione um mês válido.");
 
       const cfg = await get("settings", "config");
-      if (!cfg?.usdRate) return alert("Defina uma taxa global de câmbio antes de recalcular.");
+      if (!cfg?.usdRate) return showToast("error", "Defina uma taxa global de câmbio antes de recalcular.");
       pendingRate = cfg.usdRate;
 
       const txs = await list("transactions");
@@ -1002,7 +1022,7 @@ export async function wireSettingsHandlers(rootEl) {
       }
 
       if (pendingTxsToUpdate.length === 0) {
-        return alert("Nenhum lançamento elegível para recálculo neste mês/critério.");
+        return showToast("info", "Nenhum lançamento elegível para recálculo neste mês/critério.");
       }
 
       // Render Table
@@ -1049,7 +1069,7 @@ export async function wireSettingsHandlers(rootEl) {
         t.valueBRL = item.newBRL;
         if (!preserve) {
           // If user forced bypass of preserveFx, we clear their explicit fxRate so it's fully tracked by global again, or explicitly overwrite it.
-          // Better standard: if we are applying global rate over them, we can strip the 'fixed' status or just set it.
+          // Better standard: batch recalculator unfixes them.
           // M.D. standard: batch recalculator unfixes them.
           t.fxRate = null;
         }
@@ -1057,7 +1077,7 @@ export async function wireSettingsHandlers(rootEl) {
         count++;
       }
 
-      alert(`Sucesso! ${count} lançamentos foram salvos no banco.`);
+      showToast("success", `Sucesso! ${count} lançamentos foram salvos no banco.`);
       modalRecalc.style.display = "none";
       await refreshSettings(rootEl);
     };
@@ -1069,7 +1089,7 @@ export async function wireSettingsHandlers(rootEl) {
     recalcAllBtn.onclick = async () => {
       if (!confirm("Isso aplicará a taxa global de USD ATUAL em TODOS os lançamentos USD passados que não possuem taxa fixa congelada. Continuar?")) return;
       const cfg = await get("settings", "config");
-      if (!cfg?.usdRate) return alert("Defina o câmbio primeiro.");
+      if (!cfg?.usdRate) return showToast("error", "Defina o câmbio primeiro.");
 
       const txs = await list("transactions");
       let count = 0;
@@ -1081,7 +1101,7 @@ export async function wireSettingsHandlers(rootEl) {
           count++;
         }
       }
-      alert(`${count} lançamentos brutos globais recalculados usando taxa de R$ ${cfg.usdRate}.`);
+      showToast("success", `${count} lançamentos brutos globais recalculados usando taxa de R$ ${cfg.usdRate}.`);
     };
   }
 
@@ -1109,7 +1129,7 @@ export async function wireSettingsHandlers(rootEl) {
   rootEl.querySelector("#subForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const selectedCatId = (await get("settings", "ui_cat_view"))?.value;
-    if (!selectedCatId) return alert("Selecione uma categoria primeiro.");
+    if (!selectedCatId) return showToast("error", "Selecione uma categoria primeiro.");
 
     const name = e.target.name.value.trim();
     if (!name) return;
@@ -1312,6 +1332,7 @@ export async function wireSettingsHandlers(rootEl) {
         document.getElementById("btnSaveRule").innerText = "Salvar Regra";
         btnCancel.style.display = "none";
         document.getElementById("btnTestRule").style.display = "none";
+        showToast("success", "Edição cancelada");
       };
     }
 
@@ -1453,7 +1474,7 @@ export async function wireSettingsHandlers(rootEl) {
 
         const startMonth = fd.get("startMonth");
         const target = parseFloat(fd.get("target"));
-        if (!startMonth || !target) return alert("Mês e Valor obrigatórios para nova meta.");
+        if (!startMonth || !target) return showToast("error", "Mês e Valor obrigatórios para nova meta.");
 
         await put("goal_revisions", {
           id: uid("gr"),
@@ -1693,7 +1714,7 @@ export async function renderBudgetDetailsModal(tmplId, initialMonth) {
 
   m.innerHTML = `
     <div class="card" style="width:100%; max-width:500px; margin-top:20px; position:relative;">
-        <button id="btnCloseBudgetModal" style="position:absolute; top:10px; right:10px; background:none; border:none; font-size:1.5em; cursor:pointer;">&times;</button>
+        <button id="btnCloseBudgetModal" class="btn btn-ghost" style="position:absolute; top:10px; right:10px; font-size:1.5em;">&times;</button>
         <div id="budgetModalContent">Carregando...</div>
     </div>
   `;
@@ -1777,8 +1798,8 @@ export async function renderBudgetDetailsModal(tmplId, initialMonth) {
           </div>
 
           <div style="display:flex; gap:10px; margin-bottom:20px;">
-              <button id="btnBudgetOverride" type="button" style="flex:1; background:#17a2b8; color:white; padding:8px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">✏️ Ajustar Meta</button>
-              <button id="btnBudgetCopy" type="button" style="flex:1; background:#6c757d; color:white; padding:8px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">📋 Copiar Resumo</button>
+              <button id="btnBudgetOverride" type="button" class="btn btn-primary" style="flex:1;">✏️ Ajustar Meta</button>
+              <button id="btnBudgetCopy" type="button" class="btn btn-secondary" style="flex:1;">📋 Copiar Resumo</button>
           </div>
 
           <div>
@@ -1809,7 +1830,7 @@ export async function renderBudgetDetailsModal(tmplId, initialMonth) {
       const val = prompt(`Qual o limite de gastos SOMENTE para o mês ${currentMonth}? (ex: 800.00)`, target > 0 ? target.toFixed(2) : "");
       if (val === null) return;
       const num = parseFloat(val.replace(",", "."));
-      if (isNaN(num)) return alert("Valor numérico inválido.");
+      if (isNaN(num)) return showToast("error", "Valor numérico inválido.");
 
       const overrides = await list("budget_overrides");
       const existing = overrides.find(o => o.templateId === tmplId && o.month === currentMonth);
@@ -1845,7 +1866,7 @@ export async function renderBudgetDetailsModal(tmplId, initialMonth) {
         btn.innerText = "✅ Copiado!";
         setTimeout(() => btn.innerText = "📋 Copiar Resumo", 2000);
       } catch (err) {
-        alert("Erro ao copiar. Texto:\n\n" + text);
+        showToast("error", "Erro ao copiar. Texto:\n\n" + text);
       }
     };
   }
