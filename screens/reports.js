@@ -296,10 +296,10 @@ async function renderReports(cnt) {
     `;
 
     cnt.innerHTML = `
-    <div id="reportsContainer" style="padding-bottom:80px; max-width:800px; margin:0 auto;">
+    <div id="reportsContainer" style="padding-bottom:80px; width:100%;">
         
         <!-- HEADER / FILTERS -->
-        <div class="card" style="box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:15px; position:sticky; top:60px; z-index:100;">
+        <div class="card" style="box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:15px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <button class="btn btn-outline small" onclick="location.hash='#home'">← Voltar</button>
