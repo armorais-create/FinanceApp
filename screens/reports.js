@@ -1,5 +1,7 @@
-import { list, get, put } from "../db.js";
+import { list, get, put, remove, uid } from "../db.js";
 import { drawBarChart, exportChartToPNG } from "../utils/charts.js";
+import { prepareExportPack } from "../ui.js?v=2.0";
+import { exportCSV } from "../utils/export.js";
 
 /* =========================================
    STATE
@@ -53,8 +55,34 @@ function getPrevMonth(m, offset = 1) {
    ========================================= */
 export async function reportsScreen() {
     return `
+    <style>
+        /* Modal for Export Settings */
+        .export-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .export-modal.active { display: flex; }
+        .export-content { background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .export-content h3 { margin-top: 0; margin-bottom: 15px; }
+        .export-opt { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .export-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    </style>
     <div id="reportsContainer">
         <div class="card"><div class="small">Carregando relatórios...</div></div>
+    </div>
+    
+    <div class="export-modal" id="modalCsvReports">
+        <div class="export-content">
+            <h3>Exportar Dados (CSV)</h3>
+            <div style="color:#666; font-size:12px; margin-bottom:15px;">Selecione quais sumários deseja baixar em Excel (.csv). Os dados respeitarão os filtros atuais.</div>
+            
+            <label class="export-opt"><input type="checkbox" id="chkRptResumo" checked> Resumo do Mês</label>
+            <label class="export-opt"><input type="checkbox" id="chkRptCat"> Despesas por Categoria</label>
+            <label class="export-opt"><input type="checkbox" id="chkRptTag"> Despesas por Tag</label>
+            <label class="export-opt"><input type="checkbox" id="chkRptAcc"> Balanço por Conta</label>
+
+            <div class="export-actions">
+                <button class="btn btn-outline" id="btnCancelCsvRpt">Cancelar</button>
+                <button class="btn btn-primary" id="btnConfirmCsvRpt">Baixar CSVs</button>
+            </div>
+        </div>
     </div>
     `;
 }
@@ -109,6 +137,8 @@ export async function wireReportsHandlers(rootEl) {
             loans, loanInstallments, personBalances, balanceEvents,
             settings
         };
+
+        renderReports(container);
 
         renderReports(container);
     } catch (e) {
@@ -276,9 +306,12 @@ async function renderReports(cnt) {
                     <h3 style="margin:0; font-size:16px;">Painel / Relatórios</h3>
                 </div>
                 <div style="display:flex; gap:5px;">
-                    <button id="btnViewDashboard" class="btn small ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-secondary'}">Dash</button>
-                    <button id="btnViewDetails" class="btn small ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-secondary'}">Tabelas</button>
+                    <button class="btn btn-secondary small" id="btnExportRpt" style="background:#5c6bc0; border:none; color:#fff;">📊 Exportar CSV</button>
+                    <button id="btnViewDashboard" class="btn small ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-secondary'}" data-action="reports-view" data-view="dashboard">Dash</button>
+                    <button id="btnViewDetails" class="btn small ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-secondary'}" data-action="reports-view" data-view="details">Tabelas</button>
                     <button onclick="location.hash='#charts-report'" class="btn btn-outline small">PDF Gráfico</button>
+                    <button onclick="location.hash='#annual-report'" class="btn btn-outline small">📅 Relatório Anual</button>
+                    <button onclick="location.hash='#monthly-close'" class="btn btn-outline small">📄 Fechamento do Mês</button>
                 </div>
             </div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -303,137 +336,63 @@ async function renderReports(cnt) {
                 <button class="btn btn-primary" onclick="location.hash='#tx'">Novo Lançamento</button>
             </div>
         ` : `
-        <!-- VIEW TOGGLE -->
-        <div style="display:flex; justify-content:center; gap:10px; margin-top:15px; margin-bottom: 10px;">
-             <button id="btnViewDashboard2" class="btn ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-outline'}" style="flex:1;">📊 Painel Geral</button>
-             <button id="btnViewDetails2" class="btn ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-outline'}" style="flex:1;">📝 Detalhamento</button>
+        <div id="reportsToggleContainer" style="display:flex; justify-content:center; gap:10px; margin-top:15px; margin-bottom: 10px;">
+             <button class="btn ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-outline'}" style="flex:1;" data-action="reports-view" data-view="dashboard">📊 Painel Geral</button>
+             <button class="btn ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-outline'}" style="flex:1;" data-action="reports-view" data-view="details">📝 Detalhamento</button>
         </div>
         
-        <div id="reportsContentArea">
-            <!-- INJECTED DYNAMICALLY BELOW -->
+        <div id="reportsBody">
         </div>
         `}
     </div>
     `; // End of main outer HTML
 
-    const viewArea = cnt.querySelector("#reportsContentArea");
+    const renderCurrentView = () => {
+        const viewArea = cnt.querySelector("#reportsBody");
+        if (!viewArea) return;
 
-    // --- DASHBOARD VIEW ---
-    if (state.filters.viewMode === 'dashboard') {
-        const d_html = renderDashboardView(currentTxs, prevTxs, month, state.filters, state.cache, curr, prev);
-        if (viewArea) viewArea.innerHTML = d_html;
-
-        // Let bills update asynchronously via timeout
-        setTimeout(() => {
-            renderBillsOverview(cnt, state.filters, month);
-            renderLoansOverview(cnt, state.filters, month);
-            renderAlertsOverview(cnt, state.filters, month);
-            renderChecklistView(cnt, month);
-        }, 0);
-    }
-    // --- DETAILS VIEW (Legacy) ---
-    else {
-        viewArea.innerHTML = `
-        <!-- SUMMARY CARDS -->
-        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-            <div class="card summary-card" style="text-align:center; padding:10px;">
-                <div class="small">Receitas</div>
-                <div style="font-size:1.2em; color:#28a745;">${fmtBRL(curr.rev)}</div>
-                ${renderDelta(curr.rev, prev.rev)}
-            </div>
-            <div class="card summary-card" style="text-align:center; padding:10px;">
-                <div class="small">Despesas</div>
-                <div style="font-size:1.2em; color:#dc3545;">${fmtBRL(curr.exp)}</div>
-                ${renderDelta(curr.exp, prev.exp, true)}
-            </div>
-            <div class="card summary-card" style="text-align:center; padding:10px;">
-                <div class="small">Saldo</div>
-                <div style="font-size:1.2em; color:${curr.bal >= 0 ? '#28a745' : '#dc3545'};">${fmtBRL(curr.bal)}</div>
-                ${renderDelta(curr.bal, prev.bal)}
-            </div>
-            <div class="card summary-card" style="text-align:center; padding:10px;" id="openInvoicesCard">
-                <div class="small">Faturas Abertas</div>
-                <div style="font-size:1.2em; color:#007bff;">Calculando...</div>
-            </div>
-        </div>
-
-        <!-- VISÃO REJANE (Conditional) -->
-        <div id="divRejane"></div>
-        
-        <!-- VISÃO CONTAS A PAGAR -->
-        <div id="divBillsOverview" style="margin-top:10px;"></div>
-
-        <!-- SECTIONS -->
-        <!-- TOP 10 & CHARTS -->
-        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-             ${renderTopCategories(displayTxs)}
-             ${renderTopTags(displayTxs)}
-        </div>
-        
-        <div style="margin-top:10px;">
-             ${renderTopTransactions(displayTxs)}
-        </div>
-
-        <div style="margin-top:10px;">
-            ${renderEvolutionChart(filterTxs(state.cache.txs, getPrevMonth(month, 2), state.filters), prevTxs, currentTxs, month)}
-        </div>
-
-        <!-- SECTIONS -->
-        <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
-            
-            ${renderCatTable(displayTxs)}
-            ${renderTagTable(displayTxs)}
-            ${renderAccountTable(displayTxs)}
-            ${renderInvoiceTable(state.cache.txs, month)} 
-            
-            <div id="divBillsOverview"></div>
-            <div id="divLoansOverview"></div>
-            <div id="divRejane"></div>
-
-        </div>
-        </div>
-        `; // end of Details View block
-
-        // Post render actions for Details view
-        setTimeout(() => {
-            calcOpenInvoices(cnt, state.cache.txs, state.filters);
-            renderBillsOverview(cnt, state.filters, month);
-            renderLoansOverview(cnt, state.filters, month);
-            renderRejaneView(cnt, state.cache.txs, state.filters, month);
-
-            // Draw Top Categories Chart (20A-1)
-            if (window.__reportsCharts && window.__reportsCharts.topCats) {
-                const canvas = cnt.querySelector("#reportsCategoryChart");
-                if (canvas) {
-                    const barHitboxes = drawBarChart(canvas, window.__reportsCharts.topCats);
-
-                    // 20A-2: Drill-down click
-                    canvas.onclick = (e) => {
-                        if (!barHitboxes) return;
-                        const pos = window.getCanvasClickPosition ? window.getCanvasClickPosition(canvas, e) : null;
-                        if (!pos) return;
-
-                        const hit = barHitboxes.find(h => pos.y >= h.y && pos.y <= h.y + h.h);
-                        if (hit && hit.data && hit.data.categoryId) {
-                            state.filters.quickFilter = {
-                                type: 'category',
-                                value: hit.data.categoryId,
-                                name: hit.data.label
-                            };
-                            refresh().then(() => {
-                                const el = cnt.querySelector("#divBillsOverview"); // rough scroll target in Details
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                            });
-                        }
-                    };
-                    canvas.style.cursor = "pointer";
-
-                    const btn = cnt.querySelector("#btnExportTopCats");
-                    if (btn) btn.onclick = () => exportChartToPNG(canvas, `top_cats_${month}_${Date.now()}.png`);
-                }
+        if (state.filters.viewMode === 'dashboard') {
+            viewArea.innerHTML = renderDashboardView(currentTxs, prevTxs, month, state.filters, state.cache, curr, prev);
+            setTimeout(() => {
+                renderBillsOverview(cnt, state.filters, month);
+                renderLoansOverview(cnt, state.filters, month);
+                renderAlertsOverview(cnt, state.filters, month);
+                renderChecklistView(cnt, month);
+                calcOpenInvoices(cnt, state.cache.txs, state.filters);
+            }, 0);
+        } else {
+            if (displayTxs.length === 0) {
+                viewArea.innerHTML = `<div class="card" style="text-align:center; padding: 20px;">Sem dados para o período/filtros selecionados.</div>`;
+            } else {
+                viewArea.innerHTML = `
+                    <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                        ${renderCatTable(displayTxs)}
+                        ${renderTagTable(displayTxs)}
+                    </div>
+                    
+                    <div style="margin-top:10px;">
+                        ${renderTopTransactions(displayTxs)}
+                    </div>
+                `;
             }
-        }, 0);
-    }
+        }
+
+        // Atualizar botões de toggle
+        cnt.querySelectorAll('[data-action="reports-view"]').forEach(b => {
+            b.className = (b.dataset.view === state.filters.viewMode) ? "btn btn-primary" : "btn btn-outline";
+            b.style.flex = "1";
+        });
+    };
+
+    renderCurrentView();
+
+    // Eventos do Toggle
+    cnt.querySelectorAll('[data-action="reports-view"]').forEach(b => {
+        b.onclick = () => {
+            state.filters.viewMode = b.dataset.view;
+            renderCurrentView();
+        };
+    });
 
     // --- HANDLERS ---
 
@@ -442,6 +401,91 @@ async function renderReports(cnt) {
         await put("settings", { id: "ui_reports_state", filters: state.filters });
         renderReports(cnt);
     };
+
+    // --- CSV EXPORT LOGIC ---
+    const btnExport = cnt.querySelector("#btnExportRpt");
+    const modalCsv = document.getElementById("modalCsvReports");
+    const btnCancelCsv = document.getElementById("btnCancelCsvRpt");
+    const btnConfirmCsv = document.getElementById("btnConfirmCsvRpt");
+
+    if (btnExport && modalCsv) {
+        btnExport.onclick = () => modalCsv.classList.add("active");
+        btnCancelCsv.onclick = () => modalCsv.classList.remove("active");
+
+        btnConfirmCsv.onclick = () => {
+            const prefix = `FinanceApp_Rpt_${month}`;
+
+            // 1. Resumo
+            if (document.getElementById("chkRptResumo").checked) {
+                const calcDiff = (c, p) => c - (p || 0);
+                const calcPctStr = (c, p) => p ? ((calcDiff(c, p) / p) * 100).toFixed(0) + '%' : '0%';
+
+                const csvResumo = [
+                    ["Métrica", "Mês Atual", "Mês Anterior", "Diferença", "Variação %"],
+                    ["Receitas", curr.rev, prev.rev, calcDiff(curr.rev, prev.rev), calcPctStr(curr.rev, prev.rev)],
+                    ["Despesas", curr.exp, prev.exp, calcDiff(curr.exp, prev.exp), calcPctStr(curr.exp, prev.exp)],
+                    ["Saldo Líquido", curr.bal, prev.bal, calcDiff(curr.bal, prev.bal), calcPctStr(curr.bal, prev.bal)]
+                ];
+                exportCSV(csvResumo, `${prefix}_resumo.csv`);
+            }
+
+            // 2. Categorias
+            if (document.getElementById("chkRptCat").checked) {
+                const grpCat = {};
+                displayTxs.forEach(t => {
+                    if (t.type !== 'expense') return;
+                    const catId = t.categoryId || "uncat";
+                    grpCat[catId] = (grpCat[catId] || 0) + (t.valueBRL ?? t.value);
+                });
+                const csvCat = [["Categoria", "Total Despesas"]];
+                Object.keys(grpCat).sort((a, b) => grpCat[b] - grpCat[a]).forEach(cid => {
+                    const cName = state.cache.categories.find(c => c.id === cid)?.name || "(Sem Categoria)";
+                    csvCat.push([cName, grpCat[cid]]);
+                });
+                exportCSV(csvCat, `${prefix}_categorias.csv`);
+            }
+
+            // 3. Tags
+            if (document.getElementById("chkRptTag").checked) {
+                const grpTag = {};
+                displayTxs.forEach(t => {
+                    if (t.type !== 'expense' || !t.tags) return;
+                    t.tags.forEach(tg => {
+                        const tk = tg.toLowerCase();
+                        grpTag[tk] = (grpTag[tk] || 0) + (t.valueBRL ?? t.value);
+                    });
+                });
+                const csvTag = [["Tag", "Total Despesas"]];
+                Object.keys(grpTag).sort((a, b) => grpTag[b] - grpTag[a]).forEach(tk => {
+                    csvTag.push(["#" + tk, grpTag[tk]]);
+                });
+                exportCSV(csvTag, `${prefix}_tags.csv`);
+            }
+
+            // 4. Accounts
+            if (document.getElementById("chkRptAcc").checked) {
+                const grpAcc = {};
+                displayTxs.forEach(t => {
+                    const accId = t.accountId || t.sourceAccountId;
+                    if (!accId) return;
+                    if (!grpAcc[accId]) grpAcc[accId] = { rev: 0, exp: 0 };
+
+                    const val = t.valueBRL ?? t.value;
+                    if (t.type === 'revenue') grpAcc[accId].rev += val;
+                    else if (t.type === 'expense') grpAcc[accId].exp += val;
+                });
+                const csvAcc = [["Conta", "Receitas", "Despesas", "Resultado"]];
+                Object.keys(grpAcc).forEach(aid => {
+                    const aName = state.cache.accounts.find(a => a.id === aid)?.name || "Outros";
+                    const g = grpAcc[aid];
+                    csvAcc.push([aName, g.rev, g.exp, g.rev - g.exp]);
+                });
+                exportCSV(csvAcc, `${prefix}_contas.csv`);
+            }
+
+            modalCsv.classList.remove("active");
+        };
+    }
 
     cnt.querySelector("#repMonth").onchange = (e) => { state.filters.month = e.target.value; refresh(); };
     cnt.querySelector("#btnToday").onclick = () => {
@@ -457,15 +501,7 @@ async function renderReports(cnt) {
         refresh();
     };
 
-    cnt.querySelectorAll("#btnViewDashboard, #btnViewDashboard2").forEach(b => b.onclick = () => {
-        state.filters.viewMode = 'dashboard';
-        refresh();
-    });
-
-    cnt.querySelectorAll("#btnViewDetails, #btnViewDetails2").forEach(b => b.onclick = () => {
-        state.filters.viewMode = 'details';
-        refresh();
-    });
+    // Handlers removidos daqui pois usaremos delegation no wireReportsHandlers
 
     const btnQuick = cnt.querySelector("#btnRemoveQuick");
     if (btnQuick) btnQuick.onclick = () => {
@@ -510,14 +546,14 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
     const sortedCats = Object.keys(catGroups).sort((a, b) => catGroups[b] - catGroups[a]).slice(0, 5);
     const maxCatVal = sortedCats.length > 0 ? catGroups[sortedCats[0]] : 1;
 
-    let topCatsHtml = `<div class="small" style="color:#666; margin-bottom:10px;">Sem despesas no período.</div>`;
+    let topCatsHtml = `<div class="small" style = "color:#666; margin-bottom:10px;" > Sem despesas no período.</div > `;
     if (sortedCats.length > 0) {
         topCatsHtml = sortedCats.map(cid => {
             const name = cache.categories.find(c => c.id === cid)?.name || "(Sem Categoria)";
             const val = catGroups[cid];
             const pct = (val / maxCatVal) * 100;
             return `
-                <div style="margin-bottom:8px; cursor:pointer;" data-quick-filter="1" data-type="category" data-val="${cid}" data-name="${esc(name)}">
+                <div style = "margin-bottom:8px; cursor:pointer;" data - quick - filter="1" data - type="category" data - val="${cid}" data - name="${esc(name)}" >
                     <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px;">
                         <span>${esc(name)}</span>
                         <span style="font-weight:bold;">${fmtBRL(val)}</span>
@@ -525,8 +561,8 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                     <div style="background:#eee; height:8px; border-radius:4px; width:100%; overflow:hidden;">
                         <div style="background:#dc3545; height:100%; width:${pct}%;"></div>
                     </div>
-                </div>
-            `;
+                </div >
+                `;
         }).join("");
     }
 
@@ -551,7 +587,7 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
     const lbl2 = m2.split("-")[1] + "/" + m2.split("-")[0].slice(2);
 
     const trendHtml = `
-        <div style="display:flex; align-items:flex-end; gap:15px; height:80px; margin-top:15px; justify-content:center;">
+                <div style = "display:flex; align-items:flex-end; gap:15px; height:80px; margin-top:15px; justify-content:center;" >
             <div style="display:flex; flex-direction:column; align-items:center; width:40px; gap:5px;">
                 <div class="small" style="font-size:9px;">${fmtBRL(exp2)}</div>
                 <div style="width:20px; background:#ffc107; height:${h2}%; min-height:5px; border-radius:2px 2px 0 0;"></div>
@@ -567,25 +603,24 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                 <div style="width:20px; background:#dc3545; height:${h0}%; min-height:5px; border-radius:2px 2px 0 0;"></div>
                 <div class="small" style="font-size:10px; font-weight:bold;">${lbl0}</div>
             </div>
-        </div>
-    `;
+        </div >
+                `;
 
     // --- Format Delta helper again for local scope
     const renderDelta = (currVal, prevVal, inverse = false) => {
-        if (!prevVal) return `<div class="small" style="color:#999;">Sem histórico</div>`;
+        if (!prevVal) return `<div class="small" style = "color:#999;" > Sem histórico</div > `;
         const diff = currVal - prevVal;
         const pct = (diff / prevVal) * 100;
         let color = "gray";
         if (inverse) { color = diff > 0 ? "#dc3545" : (diff < 0 ? "#28a745" : "gray"); }
         else { color = diff > 0 ? "#28a745" : (diff < 0 ? "#dc3545" : "gray"); }
         const arrow = diff > 0 ? "▲" : (diff < 0 ? "▼" : "—");
-        return `<div class="small" style="color:${color}; font-weight:bold;">${arrow} ${fmtBRL(Math.abs(diff))} (${Math.abs(pct).toFixed(0)}%)</div>`;
+        return `<div class="small" style = "color:${color}; font-weight:bold;" > ${arrow} ${fmtBRL(Math.abs(diff))} (${Math.abs(pct).toFixed(0)}%)</div > `;
     };
 
     return `
-        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:15px;">
+                <div class="grid" style = "grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:15px;" >
             
-            <!-- Card 1: Resumo do Mês -->
             <div class="card" style="display:flex; flex-direction:column; justify-content:space-between;">
                 <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Fluxo de Caixa (Mês Atual)</h3>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
@@ -611,7 +646,6 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                 </div>
             </div>
 
-            <!-- Card 2: Top Categorias -->
             <div class="card">
                 <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Top 5 Despesas (Categorias)</h3>
                 <div style="margin-top:10px;">
@@ -620,13 +654,11 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                 <div class="small" style="color:#999; text-align:right; margin-top:5px;">*Clique p/ detalhar*</div>
             </div>
 
-            <!-- Card 3: Tendência -->
             <div class="card">
                 <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Evolução de Despesas</h3>
                 ${trendHtml}
             </div>
             
-            <!-- Cards 4, 5, 6 injected by external delayed renderers leveraging empty divs -->
             <div class="card" id="dashCardInvoices">
                 <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Cartões de Crédito (Aberto)</h3>
                 <div style="display:flex; justify-content:center; align-items:center; height:80px; color:#999; font-size:12px;">Carregando...</div>
@@ -653,8 +685,8 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                 <div style="display:flex; justify-content:center; align-items:center; height:80px; color:#999; font-size:12px;">Carregando...</div>
             </div>
 
-        </div>
-    `;
+        </div >
+                `;
 }
 
 function renderCatTable(txs) {
@@ -687,7 +719,7 @@ function renderCatTable(txs) {
     // Note: optimization - lookups in loop. MVP fine.
 
     let html = `
-        <div class="card">
+                <div class="card" >
             <div style="font-weight:bold; margin-bottom:5px;">Por Categoria (Despesas)</div>
             <table style="width:100%; font-size:12px; border-collapse:collapse;">
     `;
@@ -725,7 +757,7 @@ function renderCatTable(txs) {
         });
     });
 
-    html += `</table></div>`;
+    html += `</table></div > `;
     return html;
 }
 
@@ -747,14 +779,14 @@ function renderTagTable(txs) {
     const sorted = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
 
     let html = `
-        <div class="card">
+                <div class="card" >
             <div style="font-weight:bold; margin-bottom:5px;">Por Tag (Despesas)</div>
             <table style="width:100%; font-size:12px;">
     `;
     sorted.forEach(k => {
         html += `<tr><td style="padding:2px;">#${esc(k)}</td><td style="text-align:right;">${fmtBRL(counts[k])}</td></tr>`;
     });
-    html += `</table></div>`;
+    html += `</table></div > `;
     return html;
 }
 
@@ -775,7 +807,7 @@ function renderAccountTable(txs) {
     });
 
     let html = `
-        <div class="card">
+                <div class="card" >
             <div style="font-weight:bold; margin-bottom:5px;">Por Conta</div>
             <table style="width:100%; font-size:12px;">
                 <thead><tr style="color:#666;"><th>Conta</th><th style="text-align:right">Rec</th><th style="text-align:right">Desp</th><th style="text-align:right">Res</th></tr></thead>
@@ -794,7 +826,7 @@ function renderAccountTable(txs) {
             </tr>
         `;
     });
-    html += `</table></div>`;
+    html += `</table></div > `;
     return html;
 }
 
@@ -825,7 +857,7 @@ function renderTopCategories(txs) {
     window.__reportsCharts.topCats = chartData;
 
     return `
-    <div class="card">
+                <div class="card" >
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <strong style="font-size:14px;">Top Categorias (Desp.)</strong>
             <button type="button" class="small secondary" id="btnExportTopCats" style="padding:2px 6px; font-size:0.8em; cursor:pointer;">📥 Salvar PNG</button>
@@ -833,8 +865,8 @@ function renderTopCategories(txs) {
         <div style="width:100%; overflow-x:auto;">
             <canvas id="reportsCategoryChart" width="340" height="250" style="max-width:100%;"></canvas>
         </div>
-    </div>
-    `;
+    </div >
+                `;
 }
 
 function renderTopTags(txs) {
@@ -854,8 +886,8 @@ function renderTopTags(txs) {
     const sorted = Object.keys(groups).sort((a, b) => groups[b] - groups[a]).slice(0, 10);
     const maxVal = sorted.length ? groups[sorted[0]] : 1;
 
-    let html = `<div class="card">
-        <div style="font-weight:bold; margin-bottom:5px;">Top Tags (Desp.)</div>`;
+    let html = `<div class="card" >
+                <div style="font-weight:bold; margin-bottom:5px;">Top Tags (Desp.)</div>`;
 
     if (sorted.length === 0) html += "<div class='small'>Sem dados.</div>";
 
@@ -864,17 +896,17 @@ function renderTopTags(txs) {
         const pctBar = (val / maxVal) * 100;
 
         html += `
-            <div data-quick-filter data-type="tag" data-val="${tg}" data-name="${esc(tg)}"
-                 style="margin-bottom:4px; font-size:11px; position:relative;">
+                    <div data - quick - filter data - type="tag" data - val="${tg}" data - name="${esc(tg)}"
+            style = "margin-bottom:4px; font-size:11px; position:relative;" >
                 <div style="display:flex; justify-content:space-between; position:relative; z-index:2; padding:0 2px;">
                     <span>${esc(tg)}</span>
                     <span>${fmtBRL(val)}</span>
                 </div>
                 <div style="position:absolute; top:0; left:0; height:100%; width:${pctBar}%; background:rgba(23, 162, 184, 0.15); border-radius:2px; z-index:1;"></div>
-            </div>
-        `;
+            </div >
+                `;
     });
-    html += `</div>`;
+    html += `</div > `;
     return html;
 }
 
@@ -885,7 +917,7 @@ function renderTopTransactions(txs) {
 
     if (!expenses.length) return "";
 
-    return `<div class="card">
+    return `<div class="card" >
         <div style="font-weight:bold; margin-bottom:5px;">Top 10 Maiores Despesas</div>
         <table style="width:100%; font-size:11px; border-collapse:collapse;">
         ${expenses.map(t => `
@@ -899,7 +931,7 @@ function renderTopTransactions(txs) {
             </tr>
         `).join("")}
         </table>
-    </div>`;
+    </div > `;
 }
 
 function renderEvolutionChart(m2Txs, m1Txs, m0Txs, month) {
@@ -915,12 +947,12 @@ function renderEvolutionChart(m2Txs, m1Txs, m0Txs, month) {
     const bar = (val, label) => {
         const h = (val / max) * 100;
         return `
-            <div style="display:flex; flex-direction:column; align-items:center; flex:1;">
+                <div style = "display:flex; flex-direction:column; align-items:center; flex:1;" >
                 <div style="font-size:10px; margin-bottom:2px;">${fmtBRL(val)}</div>
                 <div style="width:30px; background:#dc3545; height:${h}px; min-height:1px; border-radius:3px 3px 0 0; transition: height 0.3s;"></div>
                 <div style="font-size:10px; margin-top:5px; color:#666;">${label}</div>
-            </div>
-        `;
+            </div >
+                `;
     };
 
     // Labels
@@ -928,14 +960,14 @@ function renderEvolutionChart(m2Txs, m1Txs, m0Txs, month) {
     const l1 = getPrevMonth(month, 1).slice(5);
     const l0 = month.slice(5);
 
-    return `<div class="card">
+    return `<div class="card" >
         <div style="font-weight:bold; margin-bottom:10px;">Evolução Despesas (3 Meses)</div>
         <div style="display:flex; align-items:flex-end; height:100px; padding-bottom:10px; border-bottom:1px solid #eee;">
             ${bar(v2, l2)}
             ${bar(v1, l1)}
             ${bar(v0, l0)}
         </div>
-    </div>`;
+    </div > `;
 }
 
 function renderInvoiceTable(allTxs, month) {
@@ -1005,10 +1037,10 @@ function renderInvoiceTable(allTxs, month) {
 
     // Render
     const cardIds = Object.keys(cardsData);
-    if (!cardIds.length) return `<div class="card"><div class="small">Nenhuma fatura encontrada para ${month}</div></div>`;
+    if (!cardIds.length) return `<div class="card" > <div class="small">Nenhuma fatura encontrada para ${month}</div></div > `;
 
     let html = `
-        <div class="card">
+                <div class="card" >
             <div style="font-weight:bold; margin-bottom:5px;">Faturas (${month})</div>
             <table style="width:100%; font-size:12px;">
     `;
@@ -1036,7 +1068,7 @@ function renderInvoiceTable(allTxs, month) {
         `;
     });
 
-    html += `</table></div>`;
+    html += `</table></div > `;
     return html;
 }
 
@@ -1061,7 +1093,7 @@ function calcOpenInvoices(cnt, txs, flt) {
         // Not filtering by person? Invoices are Card/Account level, not Person level usually.
         // Unless "Visão Rejane" tracks her part of debt.
 
-        const key = `${t.cardId}:${t.invoiceMonth}`;
+        const key = `${t.cardId}:${t.invoiceMonth} `;
         if (!invoices[key]) invoices[key] = { total: 0, paid: 0 };
 
         const val = Math.abs(t.valueBRL ?? t.value);
@@ -1086,41 +1118,41 @@ function calcOpenInvoices(cnt, txs, flt) {
         }
     });
 
-    if (flt.viewMode === 'dashboard') {
-        const dCard = cnt.querySelector("#dashCardInvoices");
-        if (dCard) {
-            cardDebts.sort((a, b) => b.debt - a.debt);
-            const top3 = cardDebts.slice(0, 3).map(cd => {
-                const cName = state.cache.cards.find(c => c.id === cd.cardId)?.name || "Cartão";
-                return `<div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">
-                    <span>${esc(cName)}</span><span style="font-weight:bold; color:#dc3545;">${fmtBRL(cd.debt)}</span>
-                </div>`;
-            }).join("");
+    // Update dashboard card if it exists
+    const dCard = cnt.querySelector("#dashCardInvoices");
+    if (dCard) {
+        cardDebts.sort((a, b) => b.debt - a.debt);
+        const top3 = cardDebts.slice(0, 3).map(cd => {
+            const cName = state.cache.cards.find(c => c.id === cd.cardId)?.name || "Cartão";
+            return `<div style = "display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;" >
+                <span>${esc(cName)}</span><span style="font-weight:bold; color:#dc3545;">${fmtBRL(cd.debt)}</span>
+            </div>`;
+        }).join("");
 
-            dCard.innerHTML = `
-                <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;">
-                    <span>Cartões de Crédito (Mês)</span>
-                    <span style="background:#dc3545; color:white; border-radius:10px; padding:2px 6px; font-size:10px;">${count} em aberto</span>
-                </h3>
-                <div style="font-size:20px; font-weight:bold; color:#dc3545; margin-top:5px; margin-bottom:10px; text-align:center;">
-                    ${fmtBRL(debt)}
-                </div>
-                <div style="border-top:1px dashed #eee; padding-top:5px;">
-                    <div style="font-size:10px; color:#999; margin-bottom:5px; text-transform:uppercase;">Maiores faturas:</div>
-                    ${top3 || '<div style="font-size:11px; color:#666; text-align:center;">Nenhuma fatura pendente.</div>'}
-                </div>
-                <div class="small" style="color:#666; font-style:italic; text-align:right; margin-top:10px; font-size:9px;">As compras já compõem as Despesas Totais.</div>
-            `;
-        }
-    } else {
-        const el = cnt.querySelector("#openInvoicesCard");
-        if (el) {
-            el.innerHTML = `
-                <div class="small">Faturas Abertas</div>
-                <div style="font-size:1.2em; color:#007bff;">${count}</div>
-                <div class="small" style="color:#dc3545;">${fmtBRL(debt)}</div>
-            `;
-        }
+        dCard.innerHTML = `
+            <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;" >
+                <span>Cartões de Crédito (Mês)</span>
+                <span style="background:#dc3545; color:white; border-radius:10px; padding:2px 6px; font-size:10px;">${count} em aberto</span>
+            </h3>
+            <div style="font-size:20px; font-weight:bold; color:#dc3545; margin-top:5px; margin-bottom:10px; text-align:center;">
+                ${fmtBRL(debt)}
+            </div>
+            <div style="border-top:1px dashed #eee; padding-top:5px;">
+                <div style="font-size:10px; color:#999; margin-bottom:5px; text-transform:uppercase;">Maiores faturas:</div>
+                ${top3 || '<div style="font-size:11px; color:#666; text-align:center;">Nenhuma fatura pendente.</div>'}
+            </div>
+            <div class="small" style="color:#666; font-style:italic; text-align:right; margin-top:10px; font-size:9px;">As compras já compõem as Despesas Totais.</div>
+        `;
+    }
+
+    // Update details view if it exists
+    const el = cnt.querySelector("#openInvoicesCard");
+    if (el) {
+        el.innerHTML = `
+            <div class="small" > Faturas Abertas</div>
+            <div style="font-size:1.2em; color:#007bff;">${count}</div>
+            <div class="small" style="color:#dc3545;">${fmtBRL(debt)}</div>
+        `;
     }
 }
 
@@ -1169,7 +1201,7 @@ function renderRejaneView(cnt, txs, flt, currentMonth) {
 
     // Note: To not duplicate logic, we don't put buttons here. We just put a redirect or a status.
     div.innerHTML = `
-    <div class="card" style="margin-top:10px; border-left:4px solid #f39c12; background:#fffcf5;">
+                <div class="card" style = "margin-top:10px; border-left:4px solid #f39c12; background:#fffcf5;" >
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <div style="font-weight:bold; color:#d68910;">🌸 Conta Corrente Adicionais: ${esc(rejanePerson.name)}</div>
             <button class="btn btn-secondary small" onclick="location.hash='#loans'">Ver Detalhes</button>
@@ -1201,8 +1233,8 @@ function renderRejaneView(cnt, txs, flt, currentMonth) {
         }
             </div>
         </div>
-    </div>
-    `;
+    </div >
+                `;
 }
 
 function renderBillsOverview(cnt, flt, currentMonth) {
@@ -1299,15 +1331,13 @@ function renderBillsOverview(cnt, flt, currentMonth) {
     const pct = sumExpected > 0 ? ((sumPaid / sumExpected) * 100).toFixed(0) : 0;
 
     // RENDER 
-    if (flt.viewMode === 'dashboard') {
-        const div = cnt.querySelector("#dashCardBills");
-        if (!div) return;
-
-        div.innerHTML = `
-            <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;">
+    const divDash = cnt.querySelector("#dashCardBills");
+    if (divDash) {
+        divDash.innerHTML = `
+                <h3 style = "margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;" >
                 <span>Contas a Pagar</span>
                 <span style="background:#17a2b8; color:white; border-radius:10px; padding:2px 6px; font-size:10px;">Progresso: ${pct}%</span>
-            </h3>
+            </h3 >
             
             <div style="display:flex; justify-content:space-around; align-items:center; margin-top:10px; text-align:center;">
                 <div>
@@ -1331,24 +1361,24 @@ function renderBillsOverview(cnt, flt, currentMonth) {
             </div>
             
              <!-- Forecasting miniature -->
-            <div style="margin-top:15px; border-top:1px dashed #eee; padding-top:10px;">
-                <div style="font-size:10px; color:#999; margin-bottom:5px; text-transform:uppercase;">Previsão p/ Próximos Meses:</div>
-                <div style="display:flex; justify-content:space-between; text-align:center;">
-                    ${forecasting.map(f => `
+                <div style="margin-top:15px; border-top:1px dashed #eee; padding-top:10px;">
+                    <div style="font-size:10px; color:#999; margin-bottom:5px; text-transform:uppercase;">Previsão p/ Próximos Meses:</div>
+                    <div style="display:flex; justify-content:space-between; text-align:center;">
+                        ${forecasting.map(f => `
                         <div style="flex:1; border-right:1px solid #f9f9f9;">
                             <div style="font-size:9px; color:#666;">${f.month.split("-")[1]}/${f.month.slice(2, 4)}</div>
                             <div style="font-size:10px; font-weight:bold; color:#444;">${fmtBRL(f.open)}</div>
                         </div>
                     `).join("").replace(/border-right:1px solid #f9f9f9;">$/, '">')}
+                    </div>
                 </div>
-            </div>
-        `;
-    } else {
-        const div = cnt.querySelector("#divBillsOverview");
-        if (!div) return;
+            `;
+    }
 
-        div.innerHTML = `
-        <div class="card" style="border: 1px solid #17a2b8;">
+    const divDet = cnt.querySelector("#divBillsOverviewDetail") || cnt.querySelector("#divBillsOverview");
+    if (divDet) {
+        divDet.innerHTML = `
+                <div class="card" style="border: 1px solid #17a2b8;">
             <div style="font-weight:bold; color:#17a2b8; margin-bottom:10px;">🗓 Contas a Pagar (Mês)</div>
             
             <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap:5px; text-align:center;">
@@ -1374,7 +1404,7 @@ function renderBillsOverview(cnt, flt, currentMonth) {
             
             <hr style="margin:10px 0; border:0; border-top:1px solid #17a2b8; opacity:0.3;"/>
             
-            <!-- Quebras -->
+            <!--Quebras -->
             <div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11px;">
                 <div style="flex:1; min-width:180px;">
                     <div style="font-weight:bold; margin-bottom:5px;">Por Categoria</div>
@@ -1391,7 +1421,7 @@ function renderBillsOverview(cnt, flt, currentMonth) {
             
             <hr style="margin:10px 0; border:0; border-top:1px dashed #17a2b8; opacity:0.3;"/>
             
-            <!-- Forecasting -->
+            <!--Forecasting -->
             <div style="font-size:12px; font-weight:bold; color:#555; margin-bottom:5px;">Próximos 3 Meses (Em Aberto/Parcial)</div>
             <div style="display:flex; justify-content:space-between; text-align:center; font-size:11px; color:#6c757d;">
                 ${forecasting.map(f => `
@@ -1403,8 +1433,8 @@ function renderBillsOverview(cnt, flt, currentMonth) {
                 `).join("")}
             </div>
             
-        </div>
-    `;
+        </div >
+                `;
     } // close else block
 } // close renderBillsOverview function
 
@@ -1509,20 +1539,34 @@ function renderLoansOverview(cnt, flt, currentMonth) {
         return;
     }
 
-    // Wrap the card
-    const div = document.createElement("div"); // wait, cnt.querySelector shouldn't be overridden if multiple appends are needed
-    const containerRef = cnt.querySelector("#divBillsOverview").parentElement; // We can append to the main list
+    const dCard = cnt.querySelector("#dashCardLoans");
+    if (dCard) {
+        const balance = sumOwedToMe - sumIOwe;
+        dCard.innerHTML = `
+            <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;">
+                <span>Empréstimos / Dívidas ativas</span>
+<span style="background:${activeCount > 0 ? '#17a2b8' : '#28a745'}; color:white; border-radius:10px; padding:2px 6px; font-size:10px;">${activeCount} ativas</span>
+            </h3>
+            <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:10px;">
+                <span style="color:#666;">Eu Devo (Amigos/Bancos)</span>
+                <span style="font-weight:bold; color:#dc3545;">${fmtBRL(sumIOwe)}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:5px; border-bottom:1px dashed #eee; padding-bottom:10px;">
+                <span style="color:#666;">Me Devem (Empréstimos)</span>
+                <span style="font-weight:bold; color:#28a745;">${fmtBRL(sumOwedToMe)}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                <span style="font-weight:bold; color:#333; font-size:11px;">Balanço das Dívidas</span>
+                <span style="font-weight:bold; font-size:16px; color:${balance >= 0 ? '#28a745' : '#dc3545'};">${fmtBRL(balance)}</span>
+            </div>
+        `;
+    }
 
-    // Actually, injecting via an id target in `renderReports` is cleaner. Let's assume there's a div. 
-    // Wait, the hook `divBillsOverview` exists in the original renderReports? No, it's manually selected.
-    // Let me find the wrapper logic... I will just return an HTML block.
-    // But `renderBillsOverview` uses `div.innerHTML = ...`. I'll do the same.
-
-    const tdiv = cnt.querySelector("#divLoansOverview");
-    if (!tdiv) return;
-
-    tdiv.innerHTML = `
-        <div class="card" style="border: 1px solid #17a2b8; border-left:4px solid #0056b3;">
+    const tdiv = cnt.querySelector("#divLoansOverviewDetail") || cnt.querySelector("#divLoansOverview");
+    if (tdiv) {
+        const balance = sumOwedToMe - sumIOwe;
+        tdiv.innerHTML = `
+            <div class="card" style="border: 1px solid #17a2b8; border-left:4px solid #0056b3;">
             <div style="font-weight:bold; color:#0056b3; margin-bottom:10px; display:flex; justify-content:space-between;">
                 <div>🤝 Dívidas & Empréstimos (Mês)</div>
                 <button class="small secondary" onclick="location.hash='#loans'">Ver Detalhes</button>
@@ -1555,7 +1599,7 @@ function renderLoansOverview(cnt, flt, currentMonth) {
             
             <hr style="margin:10px 0; border:0; border-top:1px dashed #ccc; opacity:0.8;"/>
             
-            <!-- Forecasting -->
+            <!--Forecasting -->
             <div style="font-size:12px; font-weight:bold; color:#555; margin-bottom:5px;">Próximos 3 Meses (Em Aberto/Parcial)</div>
             <div style="display:flex; justify-content:space-between; text-align:center; font-size:11px; color:#6c757d;">
                 ${forecasting.map(f => `
@@ -1566,8 +1610,9 @@ function renderLoansOverview(cnt, flt, currentMonth) {
                     </div>
                 `).join("")}
             </div>
-        </div>
-    `;
+        </div >
+                `;
+    }
 }
 
 // Quick helper missing from reports.js previously
@@ -1636,7 +1681,7 @@ async function renderAlertsOverview(cnt, flt, currentMonth) {
         if (isCurrentMonth && remaining > 1) {
             if (card.dueDay) {
                 let d = card.dueDay.toString().padStart(2, '0');
-                const dueFull = `${currentMonth}-${d}`;
+                const dueFull = `${currentMonth} -${d} `;
                 if (dueFull >= todayStr && dueFull <= in7Days) {
                     alerts.push({ text: `Fatura vence em breve: ${card.name} (R$ ${fmtBRL(remaining)})`, hash: '#invoices', type: 'warning' });
                 }
@@ -1677,28 +1722,28 @@ async function renderAlertsOverview(cnt, flt, currentMonth) {
         else if (pb.balanceBRL < 0) rejaneSaldoInfo += Math.abs(pb.balanceBRL);
     });
     if (rejaneSaldoInfo > 0) {
-        alerts.push({ text: `Rejane: saldos em aberto globais: R$ ${fmtBRL(rejaneSaldoInfo)}`, hash: '#reports', type: 'warning' });
+        alerts.push({ text: `Rejane: saldos em aberto globais: R$ ${fmtBRL(rejaneSaldoInfo)} `, hash: '#reports', type: 'warning' });
     }
 
     if (alerts.length === 0) {
         div.innerHTML = `
-            <h3 style="margin-top:0; color:#dc3545; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">⚠️ Alertas</h3>
-            <div style="font-size:11px; color:#666; text-align:center; margin-top:15px;">Nenhum alerta para o período selecionado.</div>
-        `;
+                <h3 style = "margin-top:0; color:#dc3545; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;" >⚠️ Alertas</h3 >
+                    <div style="font-size:11px; color:#666; text-align:center; margin-top:15px;">Nenhum alerta para o período selecionado.</div>
+            `;
         return;
     }
 
     const htmlArgs = alerts.map(a => `
-        <div style="background:${a.type === 'danger' ? '#f8d7da' : '#fff3cd'}; color:${a.type === 'danger' ? '#721c24' : '#856404'}; padding:8px; border-radius:4px; margin-bottom:5px; font-size:11px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="location.hash='${a.hash}'">
+                <div style = "background:${a.type === 'danger' ? '#f8d7da' : '#fff3cd'}; color:${a.type === 'danger' ? '#721c24' : '#856404'}; padding:8px; border-radius:4px; margin-bottom:5px; font-size:11px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick = "location.hash='${a.hash}'" >
             <span>${a.type === 'danger' ? '🚨' : '⚠️'} ${a.text}</span>
             <span>➔</span>
-        </div>
-    `).join("");
+        </div >
+                `).join("");
 
     div.innerHTML = `
-        <h3 style="margin-top:0; color:#dc3545; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">⚠️ Alertas de Atenção</h3>
-        <div style="margin-top:10px;">${htmlArgs}</div>
-    `;
+                <h3 style = "margin-top:0; color:#dc3545; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;" >⚠️ Alertas de Atenção</h3 >
+                    <div style="margin-top:10px;">${htmlArgs}</div>
+            `;
 }
 
 async function renderChecklistView(cnt, currentMonth) {
@@ -1744,26 +1789,34 @@ async function renderChecklistView(cnt, currentMonth) {
         renderChecklistView(cnt, currentMonth);
     };
 
+    window.__triggerExportPack = async () => {
+        await prepareExportPack();
+    };
+
     const liHtml = listItems.map(i => {
         const checked = doc.items[i.key] ? 'checked' : '';
         const style = doc.items[i.key] ? 'text-decoration:line-through; color:#999;' : 'color:#333;';
+        const isBackup = i.key === "backup";
         return `
-            <label style="display:flex; align-items:center; gap:8px; font-size:11px; margin-bottom:6px; cursor:pointer;">
-                <input type="checkbox" ${checked} onchange="window.__toggleChecklist('${i.key}')">
-                <span style="${style}">${i.text}</span>
-            </label>
-        `;
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer;" >
+                        <input type="checkbox" ${checked} onchange="window.__toggleChecklist('${i.key}')">
+                            <span style="${style}">${i.text}</span>
+                        </label>
+                    ${isBackup ? `<button class="btn btn-primary small" onclick="window.__triggerExportPack()" style="font-size:10px; padding:2px 5px;">⚡ Export Rápido</button>` : ''}
+                </div>
+            `;
     }).join("");
 
     div.innerHTML = `
-        <h3 style="margin-top:0; color:#28a745; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between; align-items:center;">
+                <h3 style = "margin-top:0; color:#28a745; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between; align-items:center;" >
             <span>✅ Rotina do Mês</span>
             <span style="font-size:10px; font-weight:normal;">${completedCount}/${listItems.length} concluído</span>
-        </h3>
+        </h3 >
         <div style="margin-top:10px;">${liHtml}</div>
         <div style="display:flex; gap:10px; margin-top:10px;">
             <button class="btn btn-secondary small" onclick="window.__markAllChecklist()" style="flex:1;">Marcar Tudo</button>
             <button class="btn btn-secondary small" onclick="window.__clearChecklist()" style="flex:1;">Limpar</button>
         </div>
-    `;
+            `;
 }

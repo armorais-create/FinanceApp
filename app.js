@@ -11,6 +11,15 @@ import { loansScreen, wireLoansHandlers } from "./screens/loans.js";
 import { rejaneReportScreen, wireRejaneReportHandlers } from "./screens/rejaneReport.js";
 import { chartsReportScreen, wireChartsReportHandlers } from "./screens/chartsReport.js";
 import { searchScreen, wireSearchHandlers } from "./screens/search.js";
+import { annualReportScreen, wireAnnualReportHandlers } from "./screens/annualReport.js";
+import { monthlyCloseScreen, wireMonthlyCloseHandlers } from "./screens/monthlyClose.js";
+import { helpScreen } from "./screens/help.js";
+
+// =========================================
+// APP VERSION
+// =========================================
+export const APP_VERSION = "1.0.0";
+
 const titleEl = document.getElementById("title");
 const viewEl = document.getElementById("view");
 const tabs = Array.from(document.querySelectorAll(".tab"));
@@ -372,6 +381,7 @@ const screens = {
             <button class="btn btn-primary" data-action="nav" data-hash="#loans">🤝 Dívidas</button>
             <button class="btn btn-secondary" data-action="nav" data-hash="#search">🔍 Buscar</button>
             <button class="btn btn-secondary" data-action="nav" data-hash="#reports">📊 Painel</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#annual-report">📅 Relatório Anual</button>
             <button class="btn btn-secondary" data-action="nav" data-hash="#rejane-report">👩‍💼 Relatório Rejane</button>
             <button class="btn btn-secondary" id="btnExportPackHome">📦 Backup Rápido</button>
           </div>
@@ -407,7 +417,10 @@ const screens = {
   loans: async () => await loansScreen(),
   "rejane-report": async () => await rejaneReportScreen(),
   "charts-report": async () => await chartsReportScreen(),
-  search: async () => await searchScreen()
+  "annual-report": async () => await annualReportScreen(),
+  "monthly-close": async () => await monthlyCloseScreen(),
+  search: async () => await searchScreen(),
+  help: async () => await helpScreen()
 };
 
 // =========================================
@@ -450,6 +463,8 @@ async function setTab(tabKeyRaw) {
     else if (tabKey === "loans") await wireLoansHandlers(viewEl);
     else if (tabKey === "rejane-report") await wireRejaneReportHandlers(viewEl);
     else if (tabKey === "charts-report") await wireChartsReportHandlers(viewEl);
+    else if (tabKey === "annual-report") await wireAnnualReportHandlers(viewEl);
+    else if (tabKey === "monthly-close") await wireMonthlyCloseHandlers(viewEl);
     else if (tabKey === "search") await wireSearchHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
