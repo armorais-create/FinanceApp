@@ -1,4 +1,5 @@
-import { list, put, uid, remove, updateTransaction, get } from "../db.js";
+import { list, put, uid, remove, updateTransaction, get } from "../db.js?v=v2";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -119,7 +120,8 @@ export async function installmentsScreen() {
 // Render Logic
 function renderPlanItem(plan, people, accounts, linkedTxs) {
     const person = people.find(p => p.id === plan.personId)?.name || "??";
-    const account = accounts.find(a => a.id === plan.accountId)?.name || "??";
+    const acc = accounts.find(a => a.id === plan.accountId);
+    const account = acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "??";
 
     const planTxs = linkedTxs.filter(t => t.installmentPlanId === plan.id).sort((a, b) => a.installmentNo - b.installmentNo);
 
@@ -190,7 +192,7 @@ function renderDetailList(plan, allTxs) {
             </div>
             <div style="text-align:right">
                 <div style="font-weight:bold">${t.currency} ${val}</div>
-                 <button class="iconBtn editTxBtn" style="padding:2px 6px; margin-top:5px;" data-tx="${dataJson}">✎</button>
+                 <button class="iconBtnPad iconBtnEdit editTxBtn" style="margin-top:5px; font-size:1em;" data-tx="${dataJson}">✎</button>
             </div>
         </li>
         `;

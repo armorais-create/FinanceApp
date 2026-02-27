@@ -1,4 +1,4 @@
-import { list, get } from "../db.js";
+import { list, get } from "../db.js?v=v2";
 import { drawLineChart, drawBarChart, drawGroupedBarChart } from "../utils/charts.js";
 
 /* =========================================

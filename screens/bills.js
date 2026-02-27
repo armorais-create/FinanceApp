@@ -1,6 +1,7 @@
-import { list, put, remove, uid, get, deleteTransaction, listByIndex } from "../db.js";
-import { showToast } from "../ui.js?v=2.0";
+import { list, put, remove, uid, get, deleteTransaction, listByIndex } from "../db.js?v=v2";
+import { showToast } from "../ui.js?v=2.1";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -516,10 +517,11 @@ export async function billsScreen() {
                 <div style="max-height:600px; overflow-y:auto; margin-top:10px;">
                     ${templates.length === 0 ? '<div class="small">Nenhum fixo cadastrado.</div>' : ''}
                     <ul class="list">
-                        ${templates.map(t => {
+        ${templates.map(t => {
             let defaultPayLabel = "Nenhum";
             if (t.defaultPayType === 'account') {
-                defaultPayLabel = `🏦 Conta: ${accounts.find(a => a.id === t.defaultPayId)?.name || '?'}`;
+                const acc = accounts.find(a => a.id === t.defaultPayId);
+                defaultPayLabel = acc ? `${getBrandIcon(acc.brandKey)} Conta: ${acc.name}` : `🏦 Conta: ?`;
             } else if (t.defaultPayType === 'card') {
                 defaultPayLabel = `💳 Cartão: ${cards.find(c => c.id === t.defaultPayId)?.name || '?'}`;
             }
@@ -545,13 +547,13 @@ export async function billsScreen() {
                                 </div>
                                 <div style="display:flex; gap:5px; flex-direction:column; align-items:flex-end;">
                                     <div style="display:flex; gap:5px;">
-                                        <button class="iconBtn" data-action="edit-tmpl" data-id="${t.id}" title="Editar">✎</button>
-                                        <button class="iconBtn" data-action="dup-tmpl" data-id="${t.id}" title="Duplicar">📑</button>
+                                        <button class="iconBtnPad iconBtnEdit" data-action="edit-tmpl" data-id="${t.id}" title="Editar">✎</button>
+                                        <button class="iconBtnPad iconBtnEdit" data-action="dup-tmpl" data-id="${t.id}" title="Duplicar">📑</button>
                                         ${t.active ?
-                    `<button class="iconBtn text-muted" data-action="toggle-tmpl" data-id="${t.id}" title="Pausar Fixo">⏸</button>` :
-                    `<button class="iconBtn text-success" data-action="toggle-tmpl" data-id="${t.id}" title="Ativar Fixo">▶️</button>`
+                    `<button class="iconBtnPad" style="background:#f8f9fa; border:1px solid #ccc; color:#666;" data-action="toggle-tmpl" data-id="${t.id}" title="Pausar Fixo">⏸</button>` :
+                    `<button class="iconBtnPad" style="background:#d4edda; border:1px solid #c3e6cb; color:#155724;" data-action="toggle-tmpl" data-id="${t.id}" title="Ativar Fixo">▶️</button>`
                 }
-                                        <button class="iconBtn text-danger" data-del="bill_templates:${t.id}" title="Excluir">×</button>
+                                        <button class="iconBtnPad iconBtnDel" data-del="bill_templates:${t.id}" title="Excluir">×</button>
                                     </div>
                                     <div class="small" style="color:var(${t.active ? '--success' : '--danger'}); font-weight:bold;">
                                         ${t.active ? 'ATIVO' : 'PAUSADO'}
@@ -592,12 +594,12 @@ export async function billsScreen() {
                                     </div>
                                     <div style="display:flex; gap:5px; flex-direction:column; align-items:flex-end;">
                                         <div style="display:flex; gap:5px;">
-                                            <button class="iconBtn" data-action="edit-plan" data-id="${p.id}">✎</button>
+                                            <button class="iconBtnPad iconBtnEdit" data-action="edit-plan" data-id="${p.id}">✎</button>
                                             ${p.active ?
-                        `<button class="iconBtn text-muted" data-action="toggle-plan" data-id="${p.id}" title="Desativar">⏸</button>` :
-                        `<button class="iconBtn text-success" data-action="toggle-plan" data-id="${p.id}" title="Ativar">▶️</button>`
+                        `<button class="iconBtnPad" style="background:#f8f9fa; border:1px solid #ccc; color:#666;" data-action="toggle-plan" data-id="${p.id}" title="Desativar">⏸</button>` :
+                        `<button class="iconBtnPad" style="background:#d4edda; border:1px solid #c3e6cb; color:#155724;" data-action="toggle-plan" data-id="${p.id}" title="Ativar">▶️</button>`
                     }
-                                            <button class="iconBtn text-danger" data-del="bill_plans:${p.id}">×</button>
+                                            <button class="iconBtnPad iconBtnDel" data-del="bill_plans:${p.id}">×</button>
                                         </div>
                                         ${p.active ? `<button class="btn btn-primary small" data-action="gen-plan-bills" data-id="${p.id}" style="font-size:0.8em; padding:2px 5px;">Gerar Parcelas</button>` : ''}
                                     </div>
@@ -725,8 +727,8 @@ export async function billsScreen() {
                             }
                                 ${!isPaid && !isSkipped && !isPartial ? `<button class="btn btn-ghost small" data-action="skip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Pular Parcela/Conta">⏭</button>` : ''}
                                 ${isSkipped ? `<button class="btn btn-primary small" data-action="unskip-bill" data-id="${b.id}" style="padding:4px 8px;" title="Reabrir">🔄 Reabrir</button>` : ''}
-                                ${b.templateId ? `<button class="iconBtn" data-action="edit-source-tmpl" data-id="${b.templateId}" title="Editar recorrência" style="font-size:1.1em;">⚙️</button>` : ''}
-                                <button class="iconBtn text-danger" data-del="bills:${b.id}" style="padding:4px 8px;">×</button>
+                                ${b.templateId ? `<button class="iconBtnPad iconBtnEdit" data-action="edit-source-tmpl" data-id="${b.templateId}" title="Editar recorrência">⚙️</button>` : ''}
+                                <button class="iconBtnPad iconBtnDel" data-del="bills:${b.id}">×</button>
                              </div>
                         </li>
                     `}).join('')}

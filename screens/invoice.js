@@ -1,7 +1,8 @@
-import { list, put, uid, get, deleteInvoice, deleteTransaction, updateTransaction, addInvoicePayment, listInvoicePaymentsByInvoiceKey, deleteInvoicePayment, makeInvoiceKey } from "../db.js";
-import { showToast } from "../ui.js?v=2.0";
+import { list, put, uid, get, deleteInvoice, deleteTransaction, updateTransaction, addInvoicePayment, listInvoicePaymentsByInvoiceKey, deleteInvoicePayment, makeInvoiceKey } from "../db.js?v=v2";
+import { showToast } from "../ui.js?v=2.1";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
 import { isInvoicePayment } from "./tx.js";
+import { exportTransactionsCSV } from "../utils/export.js";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -13,6 +14,7 @@ function esc(s) {
 let currentCardId = "";
 let currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
 let _searchState = { ...defaultSearchState };
+let _lastInvoiceDataset = { all: [], caches: {} };
 
 export function setInvoiceState(cardId, month) {
     if (cardId) currentCardId = cardId;
@@ -118,6 +120,11 @@ async function renderInvoiceView(cards, accounts) {
     const peopleOpts = `<option value="">(Sem Pessoa)</option>` + people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
     const tagList = tags.map(t => `<option value="${esc(t.name)}">`).join("");
 
+    _lastInvoiceDataset = {
+        all: [...filteredInvoiceTxs, ...filteredInvoicePayments],
+        caches: { accounts, cards, categories, people }
+    };
+
     // Check for Empty State
     const hasData = invoiceTxs.length > 0 || invoicePayments.length > 0;
     let mainContentHtml = "";
@@ -145,7 +152,7 @@ async function renderInvoiceView(cards, accounts) {
 
     <div id="invoice-view-root">
     <!--Header -->
-    <div class="card">
+    <div class="card" style="border-left: 5px solid ${card.colorHex || '#17a2b8'};">
         <div style="display:flex; justify-content:space-between; align-items:start;">
             <div>
                 <strong>Fatura de Cartão</strong>
@@ -173,7 +180,10 @@ async function renderInvoiceView(cards, accounts) {
     <!--Summary -->
     <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong>Total Fatura</strong>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <strong>Total Fatura</strong>
+                <button id="btnExportInvoice" class="btn secondary small">📊 Exportar CSV</button>
+            </div>
             <div style="text-align:right">
                 <div style="font-size:1.2em; font-weight:bold;">${currency} ${remainingGlobal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
                 <div class="small">Total: ${totalGlobal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} · Pago: ${paidGlobal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
@@ -336,7 +346,7 @@ function renderPaymentItem(p) {
             <div>${amount}</div>
         </div>
         <div style="display:flex; gap:5px;">
-            <button class="iconBtn delPayBtn" style="color:var(--danger);" data-id="${p.id}" data-txid="${p.txId || ''}" title="Excluir Pagamento">🗑</button>
+            <button class="iconBtnPad iconBtnDel delPayBtn" style="font-size:1em;" data-id="${p.id}" data-txid="${p.txId || ''}" title="Excluir Pagamento">🗑</button>
         </div>
     </li>
     `;
@@ -376,8 +386,8 @@ function renderItem(t, isPayment = false) {
             ${isUSD ? `<div class="small">R$ ${amountBRL}</div>` : ""}
         </div>
         <div style="display:flex; gap:5px;">
-            <button class="iconBtn editTxBtn" data-tx="${dataJson}">✎</button>
-            <button class="iconBtn delTxBtn" style="color:var(--danger);" data-id="${t.id}" title="Excluir Lançamento">🗑</button>
+            <button class="iconBtnPad iconBtnEdit editTxBtn" style="font-size:1em;" data-tx="${dataJson}">✎</button>
+            <button class="iconBtnPad iconBtnDel delTxBtn" style="font-size:1em;" data-id="${t.id}" title="Excluir Lançamento">🗑</button>
         </div>
     </li>
     `;
@@ -449,6 +459,29 @@ export async function wireInvoiceHandlers(rootEl) {
                 openEditDialog(rootEl, txData);
             }
         });
+    }
+
+    // Export Logic
+    const btnExportInv = rootEl.querySelector("#btnExportInvoice");
+    if (btnExportInv) {
+        btnExportInv.onclick = () => {
+            const filename = `FinanceApp_Fatura_${currentCardId}_${currentMonth}.csv`;
+            // Reconstruct rows properly to accommodate payment mapping logic
+            const rows = _lastInvoiceDataset.all.map(i => {
+                if (i.amount !== undefined && !i.value) {
+                    // It's a payment record. Cast to match export transaction requirements
+                    return {
+                        ...i,
+                        kind: "INVOICE_PAYMENT",
+                        type: "revenue", // Payments offset invoice debt, but logic treats them specifically.
+                        value: i.amount,
+                        description: `Pagamento Fatura ${i.holder === 'main' ? 'Titular' : 'Adicional'}`
+                    };
+                }
+                return { ...i, kind: "card" };
+            });
+            exportTransactionsCSV(rows, _lastInvoiceDataset.caches, filename);
+        };
     }
 
     // 4. Payment Logic

@@ -1,7 +1,8 @@
-import { list, put, uid, get } from "../db.js";
+import { list, put, uid, get } from "../db.js?v=v2";
 import { setInvoiceState } from "./invoice.js";
 import { importer } from "../utils/importer.js";
 import { applyRulesToMany } from "../rules_engine.js";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -1042,7 +1043,7 @@ function renderStepDestination(cnt) {
             <div class="form grid">
                 <label>Conta de Destino Selecionada
                     <select id="dstAccount" disabled>
-                        <option value="${destAcc ? destAcc.id : ''}">${destAcc ? esc(destAcc.name) : '---'}</option>
+                        <option value="${destAcc ? destAcc.id : ''}">${destAcc ? `${getBrandIcon(destAcc.brandKey)} ${esc(destAcc.name)}` : '---'}</option>
                     </select>
                 </label>
             </div>

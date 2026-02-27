@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+  <h1>Test Syntax</h1>
+  <div id="log"></div>
+  <script>
+    window.addEventListener("error", function (e) {
+      document.getElementById("log").innerHTML += "Global Error: " + e.message + "<br>";
+      fetch("/log_error?msg=" + encodeURIComponent(e.message));
+    });
+    window.addEventListener("unhandledrejection", function (e) {
+      document.getElementById("log").innerHTML += "Promise Error: " + e.reason + "<br>";
+      fetch("/log_error?msg=" + encodeURIComponent(e.reason));
+    });
+  </script>
+  <!-- Load the script directly as module -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
+

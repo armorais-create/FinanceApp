@@ -195,7 +195,8 @@ export function drawBarChart(canvas, data, options = {}) {
         // Value Text
         ctx.fillStyle = "#666";
         ctx.textAlign = "left";
-        ctx.fillText(formatBRL(item.value), labelWidth + barAreaWidth + 5, y + barHeight / 2);
+        const valText = options.formatValue ? options.formatValue(item.value) : formatBRL(item.value);
+        ctx.fillText(valText, labelWidth + barAreaWidth + 5, y + barHeight / 2);
     }
 
     return hitboxes;

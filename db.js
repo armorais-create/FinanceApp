@@ -1,7 +1,7 @@
 import { getCache, setCache, clearCache } from "./utils/cache.js";
 
 const DB_NAME = "financeapp";
-const DB_VERSION = 27; // INCREMENTED for Phase 20B-2 (DB Indexes Performance)
+const DB_VERSION = 29; // INCREMENTED for Metas de Patrimônio (Wealth Goals)
 const SUPPORTED_BACKUP_VERSION = 1;
 
 // Helper to validate legacy dumps
@@ -43,7 +43,11 @@ const STORES = [
     "balance_events",
     "month_checklist",
     "budget_templates",
-    "budget_overrides"
+    "budget_overrides",
+    "investment_boxes",
+    "investment_moves",
+    "wealth_goals",
+    "wealth_goal_links"
 ];
 
 function openDB() {
@@ -262,6 +266,47 @@ function openDB() {
                 const s = db.createObjectStore("budget_overrides", { keyPath: "id" });
                 s.createIndex("by_template", "templateId", { unique: false });
                 s.createIndex("by_month", "month", { unique: false });
+            }
+
+            // Investments (Caixinhas)
+            if (!db.objectStoreNames.contains("investment_boxes")) {
+                console.log("[DB Upgrade] Creating store: investment_boxes");
+                db.createObjectStore("investment_boxes", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("investment_moves")) {
+                console.log("[DB Upgrade] Creating store: investment_moves");
+                const s = db.createObjectStore("investment_moves", { keyPath: "id" });
+                s.createIndex("by_boxId", "boxId", { unique: false });
+                s.createIndex("by_date", "date", { unique: false });
+            } else {
+                const s = tx.objectStore("investment_moves");
+                if (!s.indexNames.contains("by_boxId")) {
+                    console.log("[DB Upgrade] Creating index: by_boxId on investment_moves");
+                    s.createIndex("by_boxId", "boxId", { unique: false });
+                }
+                if (!s.indexNames.contains("by_date")) {
+                    console.log("[DB Upgrade] Creating index: by_date on investment_moves");
+                    s.createIndex("by_date", "date", { unique: false });
+                }
+            }
+
+            // Wealth Goals (Metas de Patrimônio)
+            if (!db.objectStoreNames.contains("wealth_goals")) {
+                console.log("[DB Upgrade] Creating store: wealth_goals");
+                db.createObjectStore("wealth_goals", { keyPath: "id" });
+            }
+
+            if (!db.objectStoreNames.contains("wealth_goal_links")) {
+                console.log("[DB Upgrade] Creating store: wealth_goal_links");
+                const s = db.createObjectStore("wealth_goal_links", { keyPath: "id" });
+                s.createIndex("by_goalId", "goalId", { unique: false });
+            } else {
+                const s = tx.objectStore("wealth_goal_links");
+                if (!s.indexNames.contains("by_goalId")) {
+                    console.log("[DB Upgrade] Creating index: by_goalId on wealth_goal_links");
+                    s.createIndex("by_goalId", "goalId", { unique: false });
+                }
             }
         };
 
@@ -704,4 +749,119 @@ export async function deleteInvoicePaymentsByInvoiceKey(invoiceKey) {
 
 export async function deleteInvoicePayment(id) {
     return remove("invoice_payments", id);
+}
+
+// =========================================
+// INVESTMENTS (Caixinhas) HELPERS
+// =========================================
+
+export async function listInvestmentBoxes() {
+    return list("investment_boxes");
+}
+
+export async function putInvestmentBox(box) {
+    if (!box.id) box.id = uid("invbox");
+    box.updatedAt = new Date().toISOString();
+    if (!box.createdAt) box.createdAt = box.updatedAt;
+    return put("investment_boxes", box);
+}
+
+export async function deleteInvestmentBox(boxId) {
+    // Cascade delete moves
+    const db = await openDB();
+    const t = db.transaction(["investment_boxes", "investment_moves"], "readwrite");
+    const movesStore = t.objectStore("investment_moves");
+    const boxStore = t.objectStore("investment_boxes");
+
+    return new Promise((resolve, reject) => {
+        if (!movesStore.indexNames.contains("by_boxId")) {
+            return reject(new Error("Index by_boxId missing on investment_moves"));
+        }
+        const index = movesStore.index("by_boxId");
+        const req = index.openCursor(IDBKeyRange.only(boxId));
+
+        req.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+                cursor.delete();
+                cursor.continue();
+            } else {
+                // Done deleting moves, now delete the box
+                boxStore.delete(boxId);
+            }
+        };
+
+        t.oncomplete = () => {
+            clearCache();
+            resolve(true);
+        };
+        t.onerror = () => reject(t.error);
+    });
+}
+
+export async function addInvestmentMove(move) {
+    if (!move.id) move.id = uid("invmov");
+    if (!move.createdAt) move.createdAt = new Date().toISOString();
+    return put("investment_moves", move);
+}
+
+export async function deleteInvestmentMove(id) {
+    return remove("investment_moves", id);
+}
+
+export async function listMovesByBoxId(boxId) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        try {
+            const t = db.transaction("investment_moves", "readonly");
+            const s = t.objectStore("investment_moves");
+            if (!s.indexNames.contains("by_boxId")) {
+                // Fallback to full iteration if index missing (shouldn't happen with our upgrade)
+                const req = s.getAll();
+                req.onsuccess = () => {
+                    const all = req.result || [];
+                    resolve(all.filter(m => m.boxId === boxId));
+                };
+                req.onerror = () => reject(req.error);
+                return;
+            }
+            const idx = s.index("by_boxId");
+            const req = idx.getAll(boxId);
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        } catch (e) {
+            console.error(e);
+            resolve([]);
+        }
+    });
+}
+
+export async function computeBoxBalance(boxId) {
+    const moves = await listMovesByBoxId(boxId);
+    let balance = 0;
+    let balanceBRL = 0; // Se houver taxas convertidas no momento do aporte/retirada
+
+    moves.forEach(m => {
+        const sign = (m.kind === "deposit" || m.kind === "yield") ? 1 : -1;
+        balance += (m.amount || 0) * sign;
+        balanceBRL += (m.amountBRL || 0) * sign;
+    });
+
+    return { balance, balanceBRL, moveCount: moves.length };
+}
+
+export async function computeInvestmentMonthlyReturn(accountId, month) {
+    const allBoxes = await listInvestmentBoxes();
+    const boxes = allBoxes.filter(b => b.accountId === accountId);
+
+    let totalYieldBRL = 0;
+    for (const box of boxes) {
+        const moves = await listMovesByBoxId(box.id);
+        moves.forEach(m => {
+            if (m.kind === "yield" && m.date && m.date.startsWith(month)) {
+                totalYieldBRL += (m.amountBRL || 0);
+            }
+        });
+    }
+    return { yieldBRL: totalYieldBRL };
 }

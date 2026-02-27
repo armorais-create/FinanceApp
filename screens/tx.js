@@ -1,6 +1,8 @@
-import { list, put, uid, remove, updateTransaction, deleteTransaction, get } from "../db.js";
-import { showToast } from "../ui.js?v=2.0";
+import { list, put, uid, remove, updateTransaction, deleteTransaction, get } from "../db.js?v=v2";
+import { exportTransactionsCSV } from "../utils/export.js";
+import { showToast } from "../ui.js?v=2.1";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -14,6 +16,7 @@ function esc(s) {
    ========================================= */
 
 let _searchState = { ...defaultSearchState };
+let _lastTxDataset = { all: [], visible: [], caches: {} };
 
 export async function txScreen() {
     const people = await list("people");
@@ -39,85 +42,83 @@ export async function txScreen() {
 
     <div class="card">
         <div><strong>Novo Lançamento</strong></div>
-        <form id="txForm" class="form grid">
+        <form id="txForm" class="form" style="display:flex; flex-wrap:wrap; gap:10px;">
 
-            <div style="grid-column: span 2; display:flex; gap: 20px; padding-bottom:10px; align-items:center;">
-                <label><input type="radio" name="method" value="account" checked> Conta / Dinheiro</label>
-                <label><input type="radio" name="method" value="card"> Cartão de Crédito</label>
+            <div style="flex: 1 1 100%; display:flex; gap: 15px; padding-bottom:10px; align-items:center; flex-wrap:wrap;">
+                <label style="white-space:nowrap;"><input type="radio" name="method" value="account" checked> Conta / Dinheiro</label>
+                <label style="white-space:nowrap;"><input type="radio" name="method" value="card"> Cartão de Crédito</label>
                 
                 <!-- Account Installments Toggle (Only visible if Account selected) -->
-                <label id="accInstWrapper" style="display:none; margin-left:auto; background:#eee; padding:2px 8px; border-radius:4px;">
+                <label id="accInstWrapper" style="display:none; margin-left:auto; background:#eee; padding:2px 8px; border-radius:4px; white-space:nowrap;">
                     <input type="checkbox" name="isAccInstallment" id="chkAccInst"> Parcelado? (Boletos)
                 </label>
             </div>
 
-            <input name="date" type="date" value="${new Date().toISOString().split('T')[0]}" required />
+            <input name="date" type="date" value="${new Date().toISOString().split('T')[0]}" required style="flex: 1 1 160px; min-width:160px;" />
             
-            <div style="display:flex; flex-wrap:wrap; gap:12px;">
-                <input name="description" placeholder="Descrição (ex: Almoço)" required style="flex: 1 1 200px;" />
-                <div id="billMonthWrapper" style="flex: 1 1 150px;">
-                    <input name="billMonth" type="month" placeholder="Fatura (YYYY-MM)" style="width:100%" />
-                </div>
-            </div>
-            
-            <select name="type" required>
+            <input name="description" placeholder="Descrição (ex: Almoço)" required style="flex: 2 1 200px; min-width:200px;" />
+            <select name="type" required style="flex: 1 1 160px; min-width:160px;">
                 <option value="expense">Despesa</option>
                 <option value="revenue">Receita</option>
             </select>
 
-            <select name="personId" required>
+            <select name="personId" required style="flex: 1 1 160px; min-width:160px;">
                 <option value="">Pessoa...</option>
                 ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
             </select>
 
             <!-- Account Select -->
-            <select name="accountId" id="accountSelect">
+            <select name="accountId" id="accountSelect" style="flex: 1 1 160px; min-width:160px;">
                 <option value="">Conta...</option>
                 ${accounts.map(a => `<option value="${a.id}" data-currency="${a.currency}">${esc(a.name)} (${a.currency})</option>`).join("")}
             </select>
 
             <!-- Card Selects (Hidden by default) -->
-            <select name="cardId" id="cardSelect" style="display:none">
+            <select name="cardId" id="cardSelect" style="display:none; flex: 1 1 160px; min-width:160px;">
                 <option value="">Cartão...</option>
                 ${cards.map(c => `<option value="${c.id}" data-currency="${c.currency}" data-closing="${c.closingDay}" data-holder="${esc(c.holder)}" data-additional="${esc(c.additional)}">${esc(c.name)}</option>`).join("")}
             </select>
 
-            <select name="cardHolder" id="holderSelect" style="display:none">
+            <select name="cardHolder" id="holderSelect" style="display:none; flex: 1 1 120px; min-width:120px;">
                 <option value="main">Titular</option>
-                <option value="additional">Adicional</option>
+                <option value="additional">Adic.</option>
             </select>
 
-            <select name="categoryId">
+            <div id="billMonthWrapper" style="flex: 1 1 160px; min-width:160px;">
+                <input name="billMonth" type="month" placeholder="Fatura (YYYY-MM)" style="width:100%" />
+            </div>
+
+            <select name="categoryId" style="flex: 1 1 160px; min-width:160px;">
                 <option value="">Categoria...</option>
                 ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
             </select>
 
-            <input name="tags" placeholder="Tags (separar por vírgula)" list="tagList" />
+            <input name="tags" placeholder="Tags (vírgula)" list="tagList" style="flex: 1 1 160px; min-width:160px;" />
             <datalist id="tagList">
                 ${tags.map(t => `<option value="${t.name}">`).join("")}
             </datalist>
 
-            <div style="display:flex; gap:10px; align-items:center; grid-column: span 2;">
+            <div style="flex: 2 1 200px; min-width:200px; display:flex; gap:10px; align-items:center;">
                 <!-- Regular Value Input -->
                 <input name="value" type="number" step="0.01" placeholder="Valor" required style="flex:1" id="valueInput" />
                 
                 <!-- Account Installment Fields -->
                 <div id="accInstFields" style="display:none; flex:2; gap:10px; align-items:center;">
-                    <input name="instTotal" type="number" min="2" max="999" placeholder="Nº Parc." style="width:80px;" />
+                    <input name="instTotal" type="number" min="2" max="999" placeholder="Nº Parc." style="width:70px;" />
                     <span class="small">x de</span>
                     <input name="instValue" type="number" step="0.01" placeholder="Vlr Parcela" style="flex:1;" />
                 </div>
 
-                <span id="currencyLabel">BRL</span>
+                <span id="currencyLabel" style="font-weight:bold; white-space:nowrap; width:35px; text-align:right;">BRL</span>
             </div>
             
-            <div id="conversionPreview" class="small muted" style="grid-column: span 2; display:none; gap:10px; align-items:center;">
+            <button type="submit" class="btn btn-primary" style="flex: 1 1 120px; min-width:120px;">Salvar</button>
+
+            <div id="conversionPreview" class="small muted" style="flex: 1 1 100%; display:none; gap:10px; align-items:center;">
                 <div>Câmbio USD:</div>
                 <input type="number" name="fxRate" id="fxRateInput" step="0.0001" placeholder="${settings.usdRate}" style="width:80px; padding:2px; font-size:11px;" />
                 <div>| Aproximadamente <strong id="brlPreview">R$ 0,00</strong></div>
             </div>
-
-            <button type="submit" class="btn btn-primary" style="grid-column: span 2;">Salvar</button>
         </form>
     </div>
 
@@ -127,7 +128,10 @@ export async function txScreen() {
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <div><strong>Lançamentos do Mês</strong></div>
-            <input type="month" id="filterMonth" class="input" style="flex:0 auto;" value="${new Date().toISOString().substring(0, 7)}" />
+            <div style="display:flex; gap:10px; align-items:center;">
+                <input type="month" id="filterMonth" class="input" style="flex:0 auto;" value="${new Date().toISOString().substring(0, 7)}" />
+                <button id="btnExportTx" class="btn secondary small">📊 Exportar CSV</button>
+            </div>
         </div>
         
         <div id="txSearchContainer" style="margin-top: 10px;">
@@ -202,6 +206,29 @@ export async function txScreen() {
             </div>
         </form>
     </dialog>
+
+    <!-- Modal Export Tx -->
+    <div id="modalExportTx" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Exportar Lançamentos (CSV)</h3>
+            <p>Escolha o que deseja exportar com base nos filtros aplicados:</p>
+            <div style="margin: 15px 0;">
+                <label style="display:block; margin-bottom:10px;">
+                    <input type="radio" name="exportTxMode" value="visible" checked>
+                    Apenas os <b id="txExpVisibleCount">0</b> itens exibidos na tela atual
+                </label>
+                <label style="display:block;">
+                    <input type="radio" name="exportTxMode" value="all">
+                    Todos os <b id="txExpAllCount">0</b> itens que correspondem aos filtros (incluindo ocultos)
+                </label>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button id="btnCancelExportTx" class="btn btn-ghost">Cancelar</button>
+                <button id="btnConfirmExportTx" class="btn btn-primary">Baixar CSV</button>
+            </div>
+        </div>
+    </div>
+
     </div> <!-- End #tx-view-root -->
     `;
 }
@@ -216,7 +243,8 @@ function renderTxItem(t, people, accounts, cards, categories) {
 
     let sourceName = "";
     if (t.accountId) {
-        sourceName = accounts.find(a => a.id === t.accountId)?.name || "Conta?";
+        const acc = accounts.find(a => a.id === t.accountId);
+        sourceName = acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "Conta?";
     } else if (t.cardId) {
         const card = cards.find(c => c.id === t.cardId);
         const holderLabel = t.cardHolder === "additional" ? " (Adic.)" : "";
@@ -286,10 +314,10 @@ function renderTxItem(t, people, accounts, cards, categories) {
         </div>
         <div style="display:flex; gap:5px; flex-direction:column; justify-content:center;">
              ${t.kind === "planned_installment" && !t.paid ?
-            `<button class="iconBtn payInstBtn" style="color:var(--success);" data-id="${t.id}" title="Marcar como Pago">✔</button>`
+            `<button class="iconBtnPad iconBtnEdit payInstBtn" style="color:var(--success); font-size:1em;" data-id="${t.id}" title="Marcar como Pago">✔</button>`
             : ""}
-             <button class="iconBtn editTxBtn" data-tx="${dataJson}">✎</button>
-             <button class="iconBtn delTxBtn" style="color:var(--danger);" data-id="${t.id}">🗑</button>
+             <button class="iconBtnPad iconBtnEdit editTxBtn" style="font-size:1em;" data-tx="${dataJson}">✎</button>
+             <button class="iconBtnPad iconBtnDel delTxBtn" style="font-size:1em;" data-id="${t.id}">🗑</button>
         </div>
     </li>
     `;
@@ -623,6 +651,42 @@ export async function wireTxHandlers(rootEl) {
         });
     }
 
+    // Export Logic
+    const btnExportTx = rootEl.querySelector("#btnExportTx");
+    const modalExportTx = rootEl.querySelector("#modalExportTx");
+    const btnCancelExportTx = rootEl.querySelector("#btnCancelExportTx");
+    const btnConfirmExportTx = rootEl.querySelector("#btnConfirmExportTx");
+
+    if (btnExportTx && modalExportTx) {
+        btnExportTx.onclick = () => {
+            const expVisible = rootEl.querySelector("#txExpVisibleCount");
+            const expAll = rootEl.querySelector("#txExpAllCount");
+            if (expVisible) expVisible.innerText = _lastTxDataset.visible.length;
+            if (expAll) expAll.innerText = _lastTxDataset.all.length;
+
+            if (_lastTxDataset.all.length === _lastTxDataset.visible.length || _lastTxDataset.all.length === 0) {
+                // If no pagination difference, directly export all without dialog
+                const filename = `FinanceApp_Lançamentos_${new Date().toISOString().substring(0, 10)}.csv`;
+                exportTransactionsCSV(_lastTxDataset.all, _lastTxDataset.caches, filename);
+            } else {
+                modalExportTx.classList.add("active");
+            }
+        };
+
+        btnCancelExportTx.onclick = () => {
+            modalExportTx.classList.remove("active");
+        };
+
+        btnConfirmExportTx.onclick = () => {
+            const mode = rootEl.querySelector('input[name="exportTxMode"]:checked').value;
+            const targetData = mode === "all" ? _lastTxDataset.all : _lastTxDataset.visible;
+            const filename = `FinanceApp_Lançamentos_${new Date().toISOString().substring(0, 10)}.csv`;
+
+            exportTransactionsCSV(targetData, _lastTxDataset.caches, filename);
+            modalExportTx.classList.remove("active");
+        };
+    }
+
     // Edit Modal
     const editD = rootEl.querySelector("#editTxDialog");
     const editF = rootEl.querySelector("#editTxForm");
@@ -796,6 +860,13 @@ async function refreshList(rootEl) {
 
     const totalFiltered = txs.length;
     const paginatedTxs = txs.slice(0, _searchState.limit);
+
+    // Save to last dataset for CSV export
+    _lastTxDataset = {
+        all: txs,
+        visible: paginatedTxs,
+        caches: { accounts, cards, categories, people }
+    };
 
     const ul = rootEl.querySelector("#txListContainer");
     const emptyState = rootEl.querySelector("#txEmptyState");

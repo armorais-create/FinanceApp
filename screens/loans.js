@@ -1,6 +1,7 @@
-import { list, put, remove, uid, get } from "../db.js";
+import { list, put, remove, uid, get } from "../db.js?v=v2";
 import { renderGlobalSearch, wireGlobalSearch, applyGlobalSearch, defaultSearchState } from "./search.js";
-import { showToast } from "../ui.js?v=2.0";
+import { showToast } from "../ui.js?v=2.1";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 function esc(s) {
     return (s ?? "").toString()
@@ -52,7 +53,10 @@ export async function loansScreen() {
         ]);
 
         const getPersonName = (id) => people.find(p => p.id === id)?.name || "Desconhecido";
-        const getAccountName = (id) => accounts.find(a => a.id === id)?.name || "Conta";
+        const getAccountName = (id) => {
+            const acc = accounts.find(a => a.id === id);
+            return acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "Conta";
+        };
 
         // Enrich loans with payments and remaining saldo
         const enrichedLoans = loans.map(l => {
@@ -459,7 +463,10 @@ function renderLoanDetails(loan, people, accounts) {
     if (!loan) return '';
 
     const getPersonName = (id) => people.find(p => p.id === id)?.name || "Desconhecido";
-    const getAccountName = (id) => accounts.find(a => a.id === id)?.name || "Conta";
+    const getAccountName = (id) => {
+        const acc = accounts.find(a => a.id === id);
+        return acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "Conta";
+    };
 
     const isMine = loan.role === 'i_owe';
     const badgeColor = isMine ? '#dc3545' : '#28a745';
@@ -467,7 +474,7 @@ function renderLoanDetails(loan, people, accounts) {
     const rolePerson = isMine ? getPersonName(loan.borrowerPersonId) : getPersonName(loan.lenderPersonId);
 
     return `
-                < div class="backdrop" id = "loanDetailsBackdrop" style = "display:block;" ></div >
+                <div class="backdrop" id = "loanDetailsBackdrop" style = "display:block;" ></div >
                     <div class="modal open" id="loanDetailsModal" style="display:block; min-width:320px; max-width:500px;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                             <h3 style="margin-bottom:0;">${esc(loan.title)}</h3>

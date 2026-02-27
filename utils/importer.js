@@ -1,4 +1,4 @@
-import { list } from "../db.js";
+import { list } from "../db.js?v=v2";
 
 // =========================================
 // TYPES & UTILS

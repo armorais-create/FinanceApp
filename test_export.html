@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script type="module">
+  import { exportData } from "./db.js?v=v2";
+  exportData().then(json => document.body.innerHTML += "EXPORT OK: " + json.includes("investment_boxes"));
+</script>
+</body>
+</html>

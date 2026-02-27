@@ -1,4 +1,6 @@
-import { list, put, remove, uid, get, exportDB, importDB, clearDB, resetDB } from "./db.js";
+import { list, put, remove, uid, get, exportDB, importDB, clearDB, resetDB } from "./db.js?v=v2";
+import { APP_VERSION } from "./app.js";
+import { getBrandIcon, SUPPORTED_BRANDS } from "./utils/brand.js?v=2.1";
 
 function esc(s) {
   return (s ?? "").toString()
@@ -74,6 +76,12 @@ export async function settingsScreen() {
 
     const filteredSubs = selectedCatId ? subcategories.filter(s => s.categoryId === selectedCatId) : [];
 
+    // Wealth Goals (Metas de Patrimônio)
+    const wealthGoals = await list("wealth_goals");
+    const wealthGoalLinks = await list("wealth_goal_links");
+    const investmentBoxes = await list("investment_boxes");
+    const investmentMoves = await list("investment_moves"); // For calculating current balances
+
     function backupUi() {
       return `
   <div class="card">
@@ -88,6 +96,10 @@ export async function settingsScreen() {
              <button id="btnImportPack" style="flex:1;" class="btn btn-success small">⚡ Import rápido</button>
         </div>
         <button id="btnReset" class="btn btn-danger small" style="width:100%">⚠️ Resetar App</button>
+        <div style="display:flex; gap:5px; margin-top:5px;">
+            <button class="btn btn-secondary small" data-action="nav" data-hash="#help" style="flex:1;">❓ Ajuda / Como Usar</button>
+            <button id="btnHealthCheck" class="btn btn-secondary small" style="flex:1;">🩺 Rodar Verificação</button>
+        </div>
         <input type="file" id="importFile" accept=".json" style="display:none" />
         <input type="file" id="importPackFile" accept=".financeapp,.json" style="display:none" />
     </div>
@@ -99,21 +111,21 @@ export async function settingsScreen() {
         <div><strong>Regras de Importação</strong></div>
         <div class="small" style="color:#666">Automatize categoria e tags baseando-se na descrição. <br/>Ordem: Menor prioridade primeiro.</div>
         
-        <form id="ruleForm" class="form grid" style="margin-top:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
+        <form id="ruleForm" class="form" style="display:flex; flex-direction:column; gap:10px; margin-top:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
              <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="ruleFormTitle">Nova Regra</strong>
                  <div style="display:flex; gap:5px;">
-                     <button type="button" id="btnTestRule" class="btn btn-primary small" style="display:none;">🧪 Simular Regra</button>
+                     <button type="button" id="btnTestRule" class="btn btn-primary small" style="display:none;">🧪 Simular</button>
                      <button type="button" id="btnCancelEditRule" class="btn btn-secondary small" style="display:none;">Cancelar Edição</button>
                  </div>
              </div>
              
              <input type="hidden" name="id" /> <!-- For editing -->
 
-             <div class="grid" style="grid-template-columns: 2fr 1fr; gap:5px;">
-                 <input name="name" class="input" placeholder="Nome da Regra (ex: Uber)" required />
-                 <div style="display:flex; gap:5px; align-items:center;">
-                    <input name="priority" class="input" type="number" placeholder="Prioridade (0=Alta)" style="width:100%" value="10" />
+             <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                 <input name="name" class="field" placeholder="Nome da Regra (ex: Uber)" required style="flex: 2 1 200px; min-width:200px;" />
+                 <div style="display:flex; gap:5px; align-items:center; flex: 1 1 150px; min-width:150px;">
+                    <input name="priority" class="field" type="number" placeholder="Prioridade (0=Alta)" style="width:100%" value="10" />
                     <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; white-space:nowrap;">
                         <input type="checkbox" name="enabled" checked /> Ativa
                     </label>
@@ -121,30 +133,30 @@ export async function settingsScreen() {
              </div>
 
              <div style="margin-top:5px; font-weight:bold; font-size:0.9em; border-bottom:1px solid #ddd; padding-bottom:5px;">Condições de Match (Filtros)</div>
-             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                 <label class="small">Pode conter qualquer (OR):
-                    <input name="ruleAnyIncludes" class="input" placeholder="ex: uber, 99pop" style="width:100%" />
+             <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;">
+                 <label class="small" style="flex: 1 1 200px; min-width:150px;">Pode conter qualquer (OR):
+                    <input name="ruleAnyIncludes" class="field" placeholder="ex: uber, 99pop" style="width:100%" />
                  </label>
-                 <label class="small">Deve conter TODAS (AND):
-                    <input name="ruleAllIncludes" class="input" placeholder="ex: viag, internacional" style="width:100%" />
+                 <label class="small" style="flex: 1 1 200px; min-width:150px;">Deve conter TODAS (AND):
+                    <input name="ruleAllIncludes" class="field" placeholder="ex: viag, internacional" style="width:100%" />
                  </label>
-                 <label class="small">Não pode conter (NOT):
-                    <input name="ruleNoneIncludes" placeholder="ex: estorno, cancelado" style="width:100%" />
+                 <label class="small" style="flex: 1 1 200px; min-width:150px;">Não pode conter (NOT):
+                    <input name="ruleNoneIncludes" class="field" placeholder="ex: estorno, cancelado" style="width:100%" />
                  </label>
-                 <label class="small">Faixa de Valor BRL (Mín - Máx):
+                 <label class="small" style="flex: 1 1 200px; min-width:150px;">Faixa de Valor BRL (Mín - Máx):
                     <div style="display:flex; gap:5px;">
-                        <input type="number" name="ruleMinAmount" placeholder="Mín" style="width:50%" />
-                        <input type="number" name="ruleMaxAmount" placeholder="Máx" style="width:50%" />
+                        <input type="number" name="ruleMinAmount" class="field" placeholder="Mín" style="width:50%; min-width:0;" />
+                        <input type="number" name="ruleMaxAmount" class="field" placeholder="Máx" style="width:50%; min-width:0;" />
                     </div>
                  </label>
-                 <label class="small">Restringir ao Cartão:
-                    <select name="ruleCardId" style="width:100%">
+                 <label class="small" style="flex: 1 1 48%; min-width:250px;">Restringir ao Cartão:
+                    <select name="ruleCardId" class="field" style="width:100%">
                         <option value="">(Qualquer Cartão)</option>
                         ${cards.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                     </select>
                  </label>
-                 <label class="small">Restringir à Conta:
-                    <select name="ruleAccountId" style="width:100%">
+                 <label class="small" style="flex: 1 1 48%; min-width:250px;">Restringir à Conta:
+                    <select name="ruleAccountId" class="field" style="width:100%">
                         <option value="">(Qualquer Conta)</option>
                         ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
                     </select>
@@ -153,33 +165,33 @@ export async function settingsScreen() {
 
              <!-- Actions -->
              <div style="margin-top:5px; font-weight:bold; font-size:0.9em; border-bottom:1px solid #ddd; padding-bottom:5px;">Ações Aplicadas</div>
-             <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                 <label class="small">Categoria:
+             <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;">
+                 <label class="small" style="flex: 1 1 200px; min-width:200px;">Categoria:
                      <select name="actionCategory" id="ruleActionCategory" style="width:100%">
                         <option value="">(Manter Categoria)</option>
                         ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                      </select>
                  </label>
 
-                 <label class="small">Subcategoria:
+                 <label class="small" style="flex: 1 1 200px; min-width:200px;">Subcategoria:
                      <select name="actionSubcategory" id="ruleActionSubcategory" disabled style="width:100%">
                         <option value="">(Manter Subcategoria)</option>
                      </select>
                  </label>
                  
-                 <label class="small">Pessoa:
+                 <label class="small" style="flex: 1 1 200px; min-width:200px;">Pessoa:
                      <select name="actionPerson" style="width:100%">
                         <option value="">(Manter Pessoa)</option>
                         ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
                      </select>
                  </label>
 
-                 <label class="small">Tags (separar por vírgula):
-                    <input name="actionTags" placeholder="Add Tags" style="width:100%" />
+                 <label class="small" style="flex: 1 1 200px; min-width:200px;">Tags (separar por vírgula):
+                    <input name="actionTags" class="field" placeholder="Add Tags" style="width:100%" />
                  </label>
              </div>
                  
-             <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
+             <label class="checkInline" style="margin-top:10px;">
                 <input type="checkbox" name="overwrite" /> Sobrescrever dados nas linhas já preenchidas? (Agressivo)
             </label>
 
@@ -215,8 +227,8 @@ export async function settingsScreen() {
                                 </div>
                             </div>
                             <div style="display:flex; gap:5px;">
-                                <button type="button" class="iconBtn" data-action="edit-rule" data-rule="${esc(JSON.stringify(r))}">✎</button>
-                                <button type="button" class="danger iconBtn" data-del="rules:${r.id}">×</button>
+                                <button type="button" class="iconBtnPad iconBtnEdit" data-action="edit-rule" data-rule="${esc(JSON.stringify(r))}">✎</button>
+                                <button type="button" class="iconBtnPad iconBtnDel" data-del="rules:${r.id}">×</button>
                             </div>
                         </div>
                     </li>
@@ -231,23 +243,23 @@ export async function settingsScreen() {
         <h3 style="margin-top:0; color:#17a2b8;">🧪 Simulador de Regra</h3>
         <p class="small text-muted">Testa a regra atual do formulário (mesmo não salva) contra uma transação fictícia.</p>
         
-        <div class="form grid">
+        <div class="form" style="display:flex; flex-direction:column; gap:10px;">
             <label>Descrição do Extrato:
-                <input type="text" id="simDesc" placeholder="ex: UBER TRIP SP" />
+                <input type="text" id="simDesc" class="field" placeholder="ex: UBER TRIP SP" style="width:100%" />
             </label>
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <label>Valor (BRL absoluto):
-                    <input type="number" id="simVal" placeholder="ex: 35.50" value="10.00" />
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <label style="flex:1;">Valor (BRL absoluto):
+                    <input type="number" id="simVal" class="field" placeholder="ex: 35.50" value="10.00" style="width:100%" />
                 </label>
-                <label>Cartão Origem:
-                    <select id="simCardId">
+                <label style="flex:1;">Cartão Origem:
+                    <select id="simCardId" class="field" style="width:100%">
                         <option value="">(Nenhum / Não Fatura)</option>
                         ${cards.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                     </select>
                 </label>
             </div>
             <label>Conta Origem:
-                <select id="simAccId">
+                <select id="simAccId" class="field" style="width:100%">
                     <option value="">(Nenhum / Débito/Pix)</option>
                     ${accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}
                 </select>
@@ -286,63 +298,63 @@ export async function settingsScreen() {
     const goalsSection = `
     <div class="card">
         <div><strong>Metas Recorrentes</strong></div>
-        <form id="goalTemplateForm" class="form grid" style="margin-top:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
+        <form id="goalTemplateForm" class="form" style="display:flex; flex-direction:column; gap:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
             <input type="hidden" name="id" />
             <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="goalTempFormTitle">Nova Meta Recorrente</strong>
                  <button type="button" id="btnCancelEditGoalTemp" class="btn btn-secondary small" style="display:none;">Cancelar</button>
             </div>
 
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <input name="name" class="input" placeholder="Nome (ex: Mercado)" required />
-                <div style="display:flex; gap:5px; align-items:center;">
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <input name="name" class="field" placeholder="Nome (ex: Mercado)" required style="flex: 2 1 200px; min-width:200px;" />
+                <div style="display:flex; gap:5px; align-items:center; flex: 1 1 150px; min-width:150px;">
                     <span style="font-size:0.8em">Início:</span>
-                    <input name="startMonth" type="month" required value="${new Date().toISOString().slice(0, 7)}" />
+                    <input name="startMonth" type="month" required class="input field-sm" style="flex:1;" value="${new Date().toISOString().slice(0, 7)}" />
                 </div>
             </div>
 
             <!-- TYPE SELECTOR -->
-            <div style="margin-top:5px; margin-bottom:5px;">
-                <label style="margin-right:10px;"><input type="radio" name="scopeType" value="category" checked> Categoria</label>
-                <label><input type="radio" name="scopeType" value="tag"> Tag</label>
+            <div style="display:flex; gap:15px; align-items:center;">
+                <label class="checkInline"><input type="radio" name="scopeType" value="category" checked> Categoria</label>
+                <label class="checkInline"><input type="radio" name="scopeType" value="tag"> Tag</label>
             </div>
 
             <!-- CATEGORY SCOPE -->
-            <div id="goalScopeCategory" class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <select name="categoryId" id="goalTempCategory">
+            <div id="goalScopeCategory" style="display:flex; flex-wrap:wrap; gap:10px;">
+                <select name="categoryId" id="goalTempCategory" class="field" style="flex: 1 1 200px; min-width:200px;">
                     <option value="">Selecione Categoria...</option>
                     ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                 </select>
-                <select name="subcategoryId" id="goalTempSubcategory" disabled>
+                <select name="subcategoryId" id="goalTempSubcategory" class="field" disabled style="flex: 1 1 200px; min-width:200px;">
                     <option value="">(Todas Subcategorias)</option>
                 </select>
             </div>
 
             <!-- TAG SCOPE -->
-            <div id="goalScopeTag" style="display:none;">
-                <input name="tagName" list="tagList" placeholder="Nome da Tag (ex: Viagem)" style="width:100%" />
+            <div id="goalScopeTag" style="display:none; width:100%;">
+                <input name="tagName" class="field" list="tagList" placeholder="Nome da Tag (ex: Viagem)" style="width:100%" />
                 <datalist id="tagList">
                     ${tags.map(t => `<option value="${esc(t.name)}">`).join("")}
                 </datalist>
             </div>
 
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                <select name="personId">
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <select name="personId" class="field" style="flex: 1 1 200px; min-width:200px;">
                     <option value="">(Qualquer Pessoa)</option>
                     ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
                 </select>
                 
-                <div style="display:flex; gap:5px; align-items:center;">
+                <div style="display:flex; gap:5px; align-items:center; flex: 1 1 180px; min-width:180px;">
                     <span style="font-size:0.9em">R$ Padrão</span>
-                    <input name="target" type="number" step="0.01" placeholder="Alvo (ex: 500.00)" required />
+                    <input name="target" type="number" step="0.01" class="field" placeholder="Alvo (ex: 500.00)" required style="flex:1;"/>
                 </div>
             </div>
 
-            <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
+            <label class="checkInline">
                 <input type="checkbox" name="active" checked /> Meta Ativa
             </label>
 
-            <button type="submit" id="btnSaveGoalTemp" class="btn btn-primary" style="margin-top:5px;">Salvar Meta</button>
+            <button type="submit" id="btnSaveGoalTemp" class="btn btn-primary" style="margin-top:5px; align-self:flex-start;">Salvar Meta</button>
         </form>
 
         <div style="margin-top:15px;">
@@ -382,8 +394,8 @@ export async function settingsScreen() {
                             </div>
                         </div>
                         <div style="display:flex; gap:5px; align-items:flex-start;">
-                             <button type="button" class="btn btn-ghost iconBtn" data-action="edit-goal-temp" data-tmpl="${esc(JSON.stringify(t))}" data-crev="${currentT.val}">✎</button>
-                             <button type="button" class="btn btn-danger iconBtn" data-del="goal_templates:${t.id}">×</button>
+                             <button type="button" class="iconBtnPad iconBtnEdit" data-action="edit-goal-temp" data-tmpl="${esc(JSON.stringify(t))}" data-crev="${currentT.val}">✎</button>
+                             <button type="button" class="iconBtnPad iconBtnDel" data-del="goal_templates:${t.id}">×</button>
                         </div>
                     </li>
                     `;
@@ -399,10 +411,10 @@ export async function settingsScreen() {
         <div class="small" style="color:#666; margin-bottom:10px;">Defina a cotação padrão e recalcule o histórico unificado em BRL.</div>
         
         <form id="rateForm" class="form flex" style="align-items:flex-end; gap:10px; margin-bottom:15px; display:flex;">
-            <label style="flex:1">Taxa Global do Sistema
-                <input type="number" step="0.0001" name="usdRate" class="input" placeholder="Ex: 5.50" value="${settings.usdRate || ''}" required style="width:100%"/>
+            <label style="display:flex; flex-direction:column; gap:5px;">Taxa Global do Sistema
+                <input type="number" step="0.0001" name="usdRate" class="input field-sm" placeholder="Ex: 5.50" value="${settings.usdRate || ''}" required />
             </label>
-            <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Atualizar Taxa</button>
+            <button type="submit" class="btn btn-primary" style="white-space:nowrap; height:40px;">Atualizar Taxa</button>
         </form>
 
         <div style="background:#f9f9f9; padding:10px; border-radius:4px; font-size:11px;">
@@ -418,9 +430,9 @@ export async function settingsScreen() {
             <h3>Auditoria de Recálculo USD</h3>
             <div class="form" id="recalcFormArea">
                 <label>Mês Referência (YYYY-MM)
-                    <input type="month" id="recalcMonth" class="input" value="${new Date().toISOString().substring(0, 7)}" style="width:100%" />
+                    <input type="month" id="recalcMonth" class="field" value="${new Date().toISOString().substring(0, 7)}" style="width:100%" />
                 </label>
-                <label style="display:flex; align-items:flex-start; gap:5px; font-size:11px; margin-top:10px; color:#444;">
+                <label class="checkInline" style="margin-top:10px; color:#444;">
                     <input type="checkbox" id="recalcPreserveFx" checked />
                     Ignorar registros que já possuem "Taxa de Câmbio" congelada (Recomendado).
                 </label>
@@ -466,16 +478,21 @@ export async function settingsScreen() {
                 <!-- Categories Column -->
                 <div style="flex:1">
                     <div><strong>Categorias</strong></div>
-                    <form id="catForm" style="display:flex; gap:5px; margin-top:5px; margin-bottom:5px;">
-                        <input name="name" placeholder="Nova Categoria" required style="width:100%" />
-                        <button type="submit">+</button>
+                    <form id="catForm" style="display:flex; gap:5px; margin-top:5px; margin-bottom:5px; align-items:center;">
+                        <input name="name" class="field" placeholder="Nova Categoria" required style="flex:1;" />
+                        <button type="submit" class="btn btn-primary small" style="min-height:40px;">+</button>
                     </form>
                     <div style="max-height:200px; overflow:auto; border:1px solid #eee;">
                         ${categories.map(c => `
                             <div class="listItem clickable ${c.id === selectedCatId ? 'selected-row' : ''}" 
                                  data-action="select-cat" data-id="${c.id}" style="padding:5px; cursor:pointer; background:${c.id === selectedCatId ? '#eef' : '#fff'}">
-                                <span>${esc(c.name)}</span>
-                                 <button type="button" class="iconBtn danger small" data-del="categories:${c.id}">×</button>
+                                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                                    <span style="flex:1;">${esc(c.name)}</span>
+                                    <div style="display:flex; gap:5px; margin-left:10px;">
+                                        <button type="button" class="iconBtnPad iconBtnEdit" data-edit="categories|${esc(JSON.stringify(c))}">✎</button>
+                                        <button type="button" class="iconBtnPad iconBtnDel" data-del="categories:${c.id}">×</button>
+                                    </div>
+                                </div>
                             </div>
                         `).join("")}
                     </div>
@@ -484,16 +501,21 @@ export async function settingsScreen() {
                 <!-- Subcategories Column -->
                 <div style="flex:1; opacity: ${selectedCatId ? 1 : 0.5}; pointer-events: ${selectedCatId ? 'auto' : 'none'}">
                     <div class="small" style="margin-bottom:5px;">Subcategorias (${selectedCatId ? categories.find(c => c.id === selectedCatId)?.name : 'Selecione...'})</div>
-                    <form id="subForm" style="display:flex; gap:5px; margin-bottom:5px;">
-                        <input name="name" placeholder="Nova Subcategoria" required style="width:100%" />
-                        <button type="submit">+</button>
+                    <form id="subForm" style="display:flex; gap:5px; margin-bottom:5px; align-items:center;">
+                        <input name="name" class="field" placeholder="Nova Subcategoria" required style="flex:1;" />
+                        <button type="submit" class="btn btn-primary small" style="min-height:40px;">+</button>
                     </form>
                     <div style="max-height:200px; overflow:auto; border:1px solid #eee;">
                         ${filteredSubs.length === 0 ? '<div class="small" style="padding:5px;">Nenhuma.</div>' : ''}
                         ${filteredSubs.map(s => `
                             <div class="listItem" style="padding:5px;">
-                                <span>${esc(s.name)}</span>
-                                <button type="button" class="iconBtn danger small" data-del="subcategories:${s.id}">×</button>
+                                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                                    <span style="flex:1;">${esc(s.name)}</span>
+                                    <div style="display:flex; gap:5px; margin-left:10px;">
+                                        <button type="button" class="iconBtnPad iconBtnEdit" data-edit="subcategories|${esc(JSON.stringify(s))}">✎</button>
+                                        <button type="button" class="iconBtnPad iconBtnDel" data-del="subcategories:${s.id}">×</button>
+                                    </div>
+                                </div>
                             </div>
                         `).join("")}
                     </div>
@@ -504,16 +526,21 @@ export async function settingsScreen() {
     const tagSection = `
         <div class="card">
             <div><strong>Tags</strong></div>
-            <form id="tagForm" style="display:flex; gap:5px; margin-top:5px; margin-bottom:5px;">
-                <input name="name" placeholder="Nova Tag (ex: Viagem, Trabalho)" required style="width:100%" />
-                <button type="submit">+</button>
+            <form id="tagForm" style="display:flex; gap:5px; margin-top:5px; margin-bottom:5px; align-items:center;">
+                <input name="name" class="field" placeholder="Nova Tag (ex: Viagem, Trabalho)" required style="flex:1;" />
+                <button type="submit" class="btn btn-primary small" style="min-height:40px;">+</button>
             </form>
             <div style="max-height:200px; overflow:auto; border:1px solid #eee;">
                 ${tags.length === 0 ? '<div class="small" style="padding:5px;">Nenhuma.</div>' : ''}
                 ${tags.map(t => `
                     <div class="listItem" style="padding:5px;">
-                        <span>${esc(t.name)}</span>
-                        <button type="button" class="iconBtn danger small" data-del="tags:${t.id}">×</button>
+                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                            <span style="flex:1;">${esc(t.name)}</span>
+                            <div style="display:flex; gap:5px; margin-left:10px;">
+                                <button type="button" class="iconBtnPad iconBtnEdit" data-edit="tags|${esc(JSON.stringify(t))}">✎</button>
+                                <button type="button" class="iconBtnPad iconBtnDel" data-del="tags:${t.id}">×</button>
+                            </div>
+                        </div>
                     </div>
                 `).join("")}
             </div>
@@ -530,42 +557,42 @@ export async function settingsScreen() {
     <div class="card">
         <div><strong>Orçamentos do Mês</strong></div>
         <div class="small" style="color:#666; margin-bottom:10px;">Defina limites de gastos mensais por Categoria. Você poderá visualizar o progresso no Painel.</div>
-        <form id="budgetTemplateForm" class="form grid" style="background:#f9f9f9; padding:10px; border-radius:5px;">
+        <form id="budgetTemplateForm" class="form" style="display:flex; flex-direction:column; gap:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
             <input type="hidden" name="id" />
             <div style="display:flex; justify-content:space-between; align-items:center;">
                  <strong id="budgetTempFormTitle">Novo Orçamento</strong>
                  <button type="button" id="btnCancelEditBudget" class="btn btn-secondary small" style="display:none;">Cancelar</button>
             </div>
 
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px;">
-                <input name="name" class="input" placeholder="Nome (ex: Supermercado)" required />
-                <div style="display:flex; gap:5px; align-items:center;">
-                    <span style="font-size:0.9em">R$ Mensal Padrão</span>
-                    <input name="monthlyTarget" class="input" type="number" step="0.01" placeholder="Ex: 1500.00" required />
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <input name="name" class="field" placeholder="Nome (ex: Supermercado)" required style="flex: 2 1 200px; min-width:200px;" />
+                <div style="display:flex; gap:5px; align-items:center; flex: 1 1 180px; min-width:180px;">
+                    <span style="font-size:0.9em; white-space:nowrap;">R$ Mensal Padrão</span>
+                    <input name="monthlyTarget" class="field" type="number" step="0.01" placeholder="Ex: 1500.00" required style="width:100%" />
                 </div>
             </div>
 
-            <div class="grid" style="grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
-                <select name="categoryId" id="budgetTempCategory" class="select" required>
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <select name="categoryId" id="budgetTempCategory" class="field" required style="flex: 1 1 200px; min-width:200px;">
                     <option value="">Selecione Categoria...</option>
                     ${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}
                 </select>
-                <select name="subcategoryId" id="budgetTempSubcategory" class="select" disabled>
+                <select name="subcategoryId" id="budgetTempSubcategory" class="field" disabled style="flex: 1 1 200px; min-width:200px;">
                     <option value="">(Todas Subcategorias)</option>
                 </select>
             </div>
 
-            <div class="grid" style="grid-template-columns: 1fr; gap:5px; margin-top:5px;">
-                <select name="personId" class="select">
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <select name="personId" class="field" style="flex: 1 1 100%;">
                     <option value="">(Qualquer Pessoa)</option>
                     ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
                 </select>
             </div>
 
-            <label style="display:flex; align-items:center; gap:5px; font-size:0.9em; margin-top:5px;">
+            <label style="display:flex; align-items:center; gap:5px; font-size:0.9em;">
                 <input type="checkbox" name="active" checked /> Ativo
             </label>
-            <button type="submit" id="btnSaveBudget" class="btn btn-primary" style="margin-top:5px;">Salvar Orçamento</button>
+            <button type="submit" id="btnSaveBudget" class="btn btn-primary" style="margin-top:5px; align-self:flex-start;">Salvar Orçamento</button>
         </form>
 
         <div style="margin-top:15px;">
@@ -598,8 +625,8 @@ export async function settingsScreen() {
                             </div>
                         </div>
                         <div style="display:flex; gap:5px; align-items:flex-start;">
-                             <button type="button" class="btn btn-ghost iconBtn" data-action="edit-budget-temp" data-tmpl="${esc(JSON.stringify(t))}">✎</button>
-                             <button type="button" class="btn btn-danger iconBtn" data-del="budget_templates:${t.id}">×</button>
+                             <button type="button" class="iconBtnPad iconBtnEdit" data-action="edit-budget-temp" data-tmpl="${esc(JSON.stringify(t))}">✎</button>
+                             <button type="button" class="iconBtnPad iconBtnDel" data-del="budget_templates:${t.id}">×</button>
                         </div>
                     </li>
       `;
@@ -607,6 +634,110 @@ export async function settingsScreen() {
             </ul>
         </div>
     </div>
+    `;
+
+    // --- WEALTH GOALS UI ---
+    // Calculate current balance for each box mapping
+    const boxBalancesMap = {};
+    investmentBoxes.forEach(box => {
+      const boxMoves = investmentMoves.filter(m => m.boxId === box.id);
+      let balance = 0;
+      boxMoves.forEach(m => {
+        if (m.kind === 'deposit' || m.kind === 'yield') balance += m.value;
+        if (m.kind === 'withdraw') balance -= m.value;
+      });
+      boxBalancesMap[box.id] = balance;
+    });
+
+    const wealthGoalsSection = `
+    <div class="card" style="border-left: 4px solid #f39c12;">
+        <div><strong style="color:#e67e22;">Metas de Patrimônio</strong></div>
+        <div class="small" style="color:#666; margin-bottom:10px;">Defina alvos de reserva, viagem ou aquisições e vincule às suas Caixinhas (Investimentos).</div>
+        
+        <form id="wealthGoalForm" class="form" style="display:flex; flex-direction:column; gap:10px; background:#f9f9f9; padding:10px; border-radius:5px;">
+            <input type="hidden" name="id" />
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                 <strong id="wealthGoalFormTitle">Nova Meta de Patrimônio</strong>
+                 <button type="button" id="btnCancelEditWealthGoal" class="btn btn-secondary small" style="display:none;">Cancelar</button>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                <input name="name" class="field" placeholder="Nome (ex: Troca de Carro)" required style="flex: 2 1 200px; min-width:200px;" />
+                <div style="display:flex; gap:5px; align-items:center; flex: 1 1 180px; min-width:180px;">
+                    <span style="font-size:0.9em; white-space:nowrap;">Alvo BRL</span>
+                    <input name="targetValue" class="field" type="number" step="0.01" placeholder="Ex: 50000.00" required style="width:100%" />
+                </div>
+            </div>
+
+            <input name="notes" class="field" placeholder="Anotações / Notas (opcional)" style="width:100%;" />
+
+            <label style="display:flex; align-items:center; gap:5px; font-size:0.9em;">
+                <input type="checkbox" name="active" checked /> Meta Ativa
+            </label>
+            <button type="submit" id="btnSaveWealthGoal" class="btn btn-primary" style="margin-top:5px; background:#e67e22; border-color:#d35400; align-self:flex-start;">Salvar Meta</button>
+        </form>
+
+        <div style="margin-top:15px;">
+            <ul class="list">
+                 ${wealthGoals.length === 0 ? '<div class="small">Nenhuma Meta de Patrimônio configurada.</div>' : ''}
+                 ${wealthGoals.sort((a, b) => a.name.localeCompare(b.name)).map(g => {
+      // Calculate progress
+      const linkedBoxes = wealthGoalLinks.filter(l => l.goalId === g.id);
+      const currentBRL = linkedBoxes.reduce((sum, link) => sum + (boxBalancesMap[link.investmentBoxId] || 0), 0);
+      const targetBRL = (g.targetCentsBRL || 0) / 100;
+      const pctObj = targetBRL > 0 ? (currentBRL / targetBRL) * 100 : 0;
+      const pct = Math.min(100, pctObj);
+
+      return `
+                    <li class="listItem">
+                        <div style="flex:1">
+                            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                                <strong>${!g.active ? '<span style="color:#999; text-decoration:line-through;">' : ''}${esc(g.name)}${!g.active ? '</span>' : ''}</strong>
+                                <span class="small" style="font-weight:bold; color:#007bff;">
+                                    Progresso: ${(pctObj).toFixed(1)}%
+                                </span>
+                            </div>
+                            <div class="small" style="color:#666">
+                                Atual: R$ ${currentBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} / Alvo: R$ ${targetBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </div>
+                            ${g.notes ? `<div class="small" style="color:#888; font-style:italic; margin-top:2px;">"${esc(g.notes)}"</div>` : ''}
+                            
+                            <!-- Progress Bar -->
+                            <div style="background:#ddd; height:6px; border-radius:3px; margin-top:4px; overflow:hidden;">
+                               <div style="background:${pct >= 100 ? '#27ae60' : (pct >= 80 ? '#f39c12' : '#2980b9')}; height:100%; width:${pct}%;"></div>
+                            </div>
+                            
+                            <div style="margin-top:8px; display:flex; gap:5px; align-items:center;">
+                                <button type="button" class="btn btn-secondary small" data-action="link-investments" data-id="${g.id}">🔗 Vincular Investimentos (${linkedBoxes.length})</button>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:5px; align-items:flex-start;">
+                             <button type="button" class="iconBtnPad iconBtnEdit" data-action="edit-wealth-goal" data-goal="${esc(JSON.stringify(g))}">✎</button>
+                             <button type="button" class="iconBtnPad iconBtnDel" data-del="wealth_goals:${g.id}">×</button>
+                        </div>
+                    </li>
+      `;
+    }).join("")}
+            </ul>
+        </div>
+    </div>
+    
+    <!-- Modal para vinculação de investimentos -->
+    <dialog id="modalLinkInvestments" style="padding:20px; border-radius:8px; border:1px solid #ccc; width:95%; max-width:450px;">
+        <h3 style="margin-top:0; color:#e67e22;">Vincular Caixinhas</h3>
+        <div class="small" style="margin-bottom:10px; color:#555;">Selecione os investimentos cujo saldo contará para a meta <strong id="linkGoalNameStr">...</strong></div>
+        
+        <form id="linkInvestmentsForm" class="form">
+            <input type="hidden" id="linkGoalId" />
+            <div id="investmentsChecklist" style="max-height: 250px; overflow-y:auto; border: 1px solid #eee; padding:5px; background:#fafafa; border-radius:5px;">
+                 <!-- Populated dynamically via JS -->
+            </div>
+            <div style="display:flex; gap:10px; margin-top:15px; justify-content:flex-end;">
+                <button type="button" id="btnCancelLinkInst" class="btn btn-secondary small">Cancelar</button>
+                <button type="submit" class="btn btn-primary small" style="background:#e67e22; border-color:#d35400;">Salvar Vínculos</button>
+            </div>
+        </form>
+    </dialog>
     `;
 
     return `
@@ -618,13 +749,14 @@ export async function settingsScreen() {
   ${rulesSection}
   ${budgetSection}
   ${goalsSection}
+  ${wealthGoalsSection}
   ${catSection}
   ${tagSection}
   
   <div class="card">
     <div><strong>Pessoas</strong></div>
-    <form id="personForm" class="form">
-      <input name="name" class="input" placeholder="Nome" required />
+    <form id="personForm" class="form" style="display:flex; gap:10px; align-items:center;">
+      <input name="name" class="field" placeholder="Nome" required style="flex:1;" />
       <button type="submit" class="btn btn-primary">Adicionar</button>
     </form>
     <div class="small">Cadastradas: ${people.length}</div>
@@ -633,40 +765,53 @@ export async function settingsScreen() {
 
   <div class="card">
     <div><strong>Contas</strong></div>
-    <form id="accountForm" class="form">
-      <input name="name" placeholder="Nome (ex: Nubank, Wise)" required />
-      <select name="currency" required>
+    <form id="accountForm" class="form" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+      <input name="name" class="field" placeholder="Nome (ex: Nubank, Wise)" required style="flex:2; min-width:150px;" />
+      <select name="currency" class="field-sm" required style="flex:1;">
         <option value="BRL">BRL</option>
         <option value="USD">USD</option>
       </select>
-      <button type="submit" class="btn btn-primary">Adicionar</button>
+      <select name="brandKey" class="field" style="flex:2; min-width:180px;">
+        <option value="">Nenhum/Outro (Marca)</option>
+        ${SUPPORTED_BRANDS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
+      </select>
+      <input type="color" name="colorHex" value="#666666" title="Cor padrão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
+      <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
     </form>
     <div class="small">Cadastradas: ${accounts.length}</div>
-    ${renderList("accounts", accounts, a => `${esc(a.name)} <span class="small">(${esc(a.currency)})</span>`)}
+    ${renderList("accounts", accounts, a => `
+      <span style="display:inline-block; width:12px; height:12px; background:${esc(a.colorHex || '#666666')}; border-radius:50%; margin-right:5px; vertical-align:middle;"></span>
+      ${esc(a.name)} <span class="small">(${esc(a.currency)}) ${a.brandKey ? '[' + getBrandIcon(a.brandKey) + ']' : ''}</span>
+    `)}
   </div>
 
   <div class="card">
     <div><strong>Cartões (Titular + Adicional)</strong></div>
-    <form id="cardForm" class="form grid">
-      <input name="name" placeholder="Nome (ex: Amex, Visa)" required />
-      <select name="currency" required>
-        <option value="BRL">BRL</option>
-        <option value="USD">USD</option>
-      </select>
-      <input name="closingDay" type="number" min="1" max="28" placeholder="Dia fechamento (1-28)" required />
-      <input name="dueDay" type="number" min="1" max="28" placeholder="Dia vencimento (1-28)" required />
-      <input name="holder" placeholder="Titular (ex: André)" required />
-      <select name="defaultAccountMain">
-        <option value="">Conta Padrão Titular...</option>
-        ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
-      </select>
-
-      <input name="additional" placeholder="Adicional (ex: Jessica) — opcional" />
-      <select name="defaultAccountAdditional">
-        <option value="">Conta Padrão Adicional...</option>
-        ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
-      </select>
-      <button type="submit" class="btn btn-primary">Adicionar</button>
+    <form id="cardForm" class="form" style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+        <input name="name" class="field" placeholder="Nome (ex: Amex, Visa)" required style="flex:2; min-width:150px;" />
+        <select name="currency" class="field-sm" required style="flex:1;">
+          <option value="BRL">BRL</option>
+          <option value="USD">USD</option>
+        </select>
+        <input name="holder" class="field" placeholder="Titular (ex: André)" required style="flex:2; min-width:120px;" />
+        <input name="closingDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia fecha. (1-28)" required style="flex:1;" />
+        <input name="dueDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia venc. (1-28)" required style="flex:1;" />
+      </div>
+      
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+        <select name="defaultAccountMain" class="field" style="flex:2; min-width:150px;">
+          <option value="">Conta Padrão Titular...</option>
+          ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
+        </select>
+        <input name="additional" class="field" placeholder="Adicional (ex: Jessica) — opcional" style="flex:2; min-width:120px;" />
+        <select name="defaultAccountAdditional" class="field" style="flex:2; min-width:150px;">
+          <option value="">Conta Padrão Adicional...</option>
+          ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
+        </select>
+        <input type="color" name="colorHex" value="#17a2b8" title="Cor padrão do Cartão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
+        <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
+      </div>
     </form>
     <div class="small">Cadastrados: ${cards.length}</div>
     ${renderList("cards", cards, c => `
@@ -678,6 +823,19 @@ export async function settingsScreen() {
       </span>
     `)}
   </div>
+  
+  <div style="text-align: center; color: #999; margin: 25px 0 10px 0; font-size: 0.9em;">
+      FinanceApp v${APP_VERSION}
+  </div>
+
+  <!-- Modal Health Check -->
+  <dialog id="modalHealthCheck" style="padding:20px; border-radius:8px; border:1px solid #ccc; width:95%; max-width:400px;">
+      <h3 style="margin-top:0; color:#17a2b8;">🩺 Saúde do App</h3>
+      <div id="healthCheckResults" style="margin: 15px 0; font-size:0.95em; line-height:1.6;"></div>
+      <div style="text-align:right;">
+           <button type="button" id="btnClsHealthCheck" class="btn btn-secondary">Fechar</button>
+      </div>
+  </dialog>
   `;
   } catch (err) {
     console.error("[SETTINGS ERROR]", err);
@@ -700,9 +858,12 @@ function renderList(store, items, renderFn) {
   return `
     <ul class="list">
       ${items.map(i => `
-        <li class="listItem">
-          <div>${renderFn(i)}</div>
-          <button type="button" class="btn btn-danger small" data-del="${store}:${i.id}">Excluir</button>
+        <li class="listItem" style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="flex:1;">${renderFn(i)}</div>
+          <div style="display:flex; gap:5px; margin-left:10px;">
+            <button type="button" class="iconBtnPad iconBtnEdit" data-edit="${store}|${esc(JSON.stringify(i))}">✎</button>
+            <button type="button" class="iconBtnPad iconBtnDel" data-del="${store}:${i.id}">×</button>
+          </div>
         </li>
       `).join("")}
     </ul>
@@ -937,6 +1098,61 @@ export async function wireSettingsHandlers(rootEl) {
     };
   }
 
+  // HEALTH CHECK LOGIC
+  const btnHealthCheck = rootEl.querySelector("#btnHealthCheck");
+  const modalHealthCheck = rootEl.querySelector("#modalHealthCheck");
+  const btnClsHealthCheck = rootEl.querySelector("#btnClsHealthCheck");
+  const healthResults = rootEl.querySelector("#healthCheckResults");
+
+  if (btnHealthCheck) {
+    btnHealthCheck.onclick = async () => {
+      let resultsHtml = "";
+
+      // 1. Service Worker
+      if ('serviceWorker' in navigator) {
+        const sw = await navigator.serviceWorker.getRegistration();
+        if (sw && sw.active) {
+          resultsHtml += "<div>✅ Service Worker Ativo (Offline OK)</div>";
+        } else {
+          resultsHtml += "<div>⚠️ Service Worker não ativo (Offline pode falhar)</div>";
+        }
+      } else {
+        resultsHtml += "<div>⚠️ Service Worker não suportado neste navegador.</div>";
+      }
+
+      // 2. IndexedDB
+      try {
+        const dbs = await window.indexedDB.databases();
+        const mainDb = dbs.find(d => d.name === "financeapp");
+        if (mainDb) {
+          resultsHtml += "<div>✅ Banco de Dados Local acessível</div>";
+        } else {
+          // It might exist but the API might be restricted or it's named differently
+          resultsHtml += "<div>✅ Banco de Dados Local presumido (API databases n/a ou não listado)</div>";
+        }
+      } catch (e) {
+        resultsHtml += "<div>✅ Banco de Dados Local acessível</div>"; // fallback if databases() fails
+      }
+
+      // 3. Storage Estimate
+      if (navigator.storage && navigator.storage.estimate) {
+        try {
+          const estimate = await navigator.storage.estimate();
+          const usedMB = (estimate.usage / (1024 * 1024)).toFixed(2);
+          const totalMB = (estimate.quota / (1024 * 1024)).toFixed(0);
+          resultsHtml += `<div>✅ Armazenamento usado: ${usedMB} MB (limite: ~${totalMB} MB)</div>`;
+        } catch (e) { }
+      }
+
+      healthResults.innerHTML = resultsHtml;
+      modalHealthCheck.showModal();
+    };
+  }
+
+  if (btnClsHealthCheck) {
+    btnClsHealthCheck.onclick = () => modalHealthCheck.close();
+  }
+
   // Force Reset (Error Screen)
   const btnForce = rootEl.querySelector("#btnForceReset");
   if (btnForce) {
@@ -1108,10 +1324,12 @@ export async function wireSettingsHandlers(rootEl) {
   // Categories
   rootEl.querySelector("#catForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const id = e.target.elements.id?.value || uid("cat");
     const name = e.target.name.value.trim();
     if (!name) return;
-    await put("categories", { id: uid("cat"), name });
+    await put("categories", { id, name });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
     await refreshSettings(rootEl);
   });
 
@@ -1131,47 +1349,59 @@ export async function wireSettingsHandlers(rootEl) {
     const selectedCatId = (await get("settings", "ui_cat_view"))?.value;
     if (!selectedCatId) return showToast("error", "Selecione uma categoria primeiro.");
 
+    const id = e.target.elements.id?.value || uid("sub");
     const name = e.target.name.value.trim();
     if (!name) return;
-    await put("subcategories", { id: uid("sub"), categoryId: selectedCatId, name });
+    await put("subcategories", { id, categoryId: selectedCatId, name });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
     await refreshSettings(rootEl);
   });
 
   // Tags
   rootEl.querySelector("#tagForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const id = e.target.elements.id?.value || uid("tag");
     const name = e.target.name.value.trim();
     if (!name) return;
-    await put("tags", { id: uid("tag"), name });
+    await put("tags", { id, name });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
     await refreshSettings(rootEl);
   });
 
   // Pessoas
   rootEl.querySelector("#personForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const id = e.target.elements.id?.value || uid("p");
     const name = e.target.name.value.trim();
     if (!name) return;
-    await put("people", { id: uid("p"), name });
+    await put("people", { id, name });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
     await refreshSettings(rootEl);
   });
 
   // Contas
   rootEl.querySelector("#accountForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const id = e.target.elements.id?.value || uid("a");
     const name = e.target.name.value.trim();
     const currency = e.target.currency.value;
+    const brandKey = e.target.brandKey.value;
+    const colorHex = e.target.colorHex.value;
     if (!name) return;
-    await put("accounts", { id: uid("a"), name, currency });
+    await put("accounts", { id, name, currency, brandKey: brandKey || null, colorHex: colorHex || null });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
+    e.target.colorHex.value = "#666666";
     await refreshSettings(rootEl);
   });
 
   // Cartões
   rootEl.querySelector("#cardForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const id = e.target.elements.id?.value || uid("c");
     const name = e.target.name.value.trim();
     const currency = e.target.currency.value;
     const closingDay = Number(e.target.closingDay.value);
@@ -1180,15 +1410,19 @@ export async function wireSettingsHandlers(rootEl) {
     const additional = e.target.additional.value.trim();
     const defaultAccountMain = e.target.defaultAccountMain.value;
     const defaultAccountAdditional = e.target.defaultAccountAdditional.value;
+    const colorHex = e.target.colorHex?.value || "#17a2b8";
 
     await put("cards", {
-      id: uid("c"),
+      id,
       name, currency, closingDay, dueDay,
       holder, additional: additional || null,
       defaultAccountMain: defaultAccountMain || null,
-      defaultAccountAdditional: defaultAccountAdditional || null
+      defaultAccountAdditional: defaultAccountAdditional || null,
+      colorHex
     });
     e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
+    if (e.target.colorHex) e.target.colorHex.value = "#17a2b8";
     await refreshSettings(rootEl);
   });
 
@@ -1278,6 +1512,105 @@ export async function wireSettingsHandlers(rootEl) {
       await refreshSettings(rootEl);
     });
 
+    // Wealth Goals Form Handler
+    const wgForm = rootEl.querySelector("#wealthGoalForm");
+    if (wgForm) {
+      wgForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+
+        let id = fd.get("id");
+        if (!id) id = uid("wg");
+
+        const targetValue = parseFloat(fd.get("targetValue"));
+        if (isNaN(targetValue) || targetValue <= 0) {
+          showToast("error", "Valor alvo inválido.");
+          return;
+        }
+
+        const goal = {
+          id,
+          name: fd.get("name").trim(),
+          targetCentsBRL: Math.round(targetValue * 100),
+          active: fd.get("active") === "on",
+          notes: fd.get("notes").trim(),
+          updatedAt: new Date().toISOString()
+        };
+
+        if (!fd.get("id")) goal.createdAt = goal.updatedAt;
+
+        await put("wealth_goals", goal);
+        e.target.reset();
+        await refreshSettings(rootEl);
+      });
+    }
+
+    // Generic Edit Handler for entities using renderList
+    rootEl.addEventListener("click", (e) => {
+      const btnEdit = e.target.closest("[data-edit]");
+      if (btnEdit) {
+        const idx = btnEdit.dataset.edit.indexOf("|");
+        const store = btnEdit.dataset.edit.substring(0, idx);
+        const itemStr = btnEdit.dataset.edit.substring(idx + 1);
+        const item = JSON.parse(itemStr);
+
+        const configs = {
+          "people": { formId: "#personForm" },
+          "accounts": { formId: "#accountForm" },
+          "cards": { formId: "#cardForm" },
+          "categories": { formId: "#catForm" },
+          "subcategories": { formId: "#subForm" },
+          "tags": { formId: "#tagForm" },
+        };
+
+        const cfg = configs[store];
+        if (!cfg) return;
+
+        const form = rootEl.querySelector(cfg.formId);
+        if (!form) return;
+
+        let idInput = form.querySelector("[name='id']");
+        if (!idInput) {
+          idInput = document.createElement("input");
+          idInput.type = "hidden";
+          idInput.name = "id";
+          form.appendChild(idInput);
+        }
+
+        Object.keys(item).forEach(k => {
+          const input = form.querySelector(`[name='${k}']`);
+          if (input) {
+            if (input.type === 'checkbox') input.checked = item[k];
+            else input.value = item[k] || '';
+          }
+        });
+        idInput.value = item.id;
+
+        const submitBtn = form.querySelector("button[type='submit']");
+        if (submitBtn) submitBtn.innerText = "Salvar Alterações";
+
+        let cancelBtn = form.querySelector(".btn-cancel-edit");
+        if (!cancelBtn) {
+          cancelBtn = document.createElement("button");
+          cancelBtn.type = "button";
+          cancelBtn.className = "btn btn-secondary small btn-cancel-edit";
+          cancelBtn.innerText = "Cancelar";
+          cancelBtn.onclick = () => {
+            form.reset();
+            idInput.value = "";
+            submitBtn.innerText = store === 'categories' || store === 'subcategories' || store === 'tags' ? '+' : 'Adicionar';
+            cancelBtn.style.display = "none";
+            if (form.querySelector("[name='colorHex']")) form.querySelector("[name='colorHex']").value = store === 'accounts' ? "#666666" : "#17a2b8";
+          };
+          submitBtn.parentNode.insertBefore(cancelBtn, submitBtn.nextSibling);
+          submitBtn.parentNode.style.display = 'flex';
+          submitBtn.parentNode.style.gap = '5px';
+        }
+        cancelBtn.style.display = "inline-block";
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+
     // Edit Rule Handler
     rootEl.addEventListener("click", async (e) => {
       const btn = e.target.closest("[data-action='edit-rule']");
@@ -1320,6 +1653,25 @@ export async function wireSettingsHandlers(rootEl) {
         // Scroll to form
         f.scrollIntoView({ behavior: "smooth" });
       }
+
+      // Wealth Goals Edit
+      const btnEditGoal = e.target.closest("[data-action='edit-wealth-goal']");
+      if (btnEditGoal) {
+        const goal = JSON.parse(btnEditGoal.dataset.goal);
+        const f = wgForm;
+        if (!f) return;
+
+        f.querySelector("[name=id]").value = goal.id;
+        f.querySelector("[name=name]").value = goal.name;
+        f.querySelector("[name=targetValue]").value = (goal.targetCentsBRL / 100).toFixed(2);
+        f.querySelector("[name=notes]").value = goal.notes || "";
+        f.querySelector("[name=active]").checked = goal.active !== false;
+
+        document.getElementById("wealthGoalFormTitle").innerText = "Editar Meta de Patrimônio";
+        document.getElementById("btnSaveWealthGoal").innerText = "Salvar Alterações";
+        document.getElementById("btnCancelEditWealthGoal").style.display = "block";
+        f.scrollIntoView({ behavior: "smooth" });
+      }
     });
 
     const btnCancel = rootEl.querySelector("#btnCancelEditRule");
@@ -1333,6 +1685,17 @@ export async function wireSettingsHandlers(rootEl) {
         btnCancel.style.display = "none";
         document.getElementById("btnTestRule").style.display = "none";
         showToast("success", "Edição cancelada");
+      };
+    }
+
+    const btnCancelGoal = rootEl.querySelector("#btnCancelEditWealthGoal");
+    if (btnCancelGoal && wgForm) {
+      btnCancelGoal.onclick = () => {
+        wgForm.reset();
+        wgForm.querySelector("[name=id]").value = "";
+        document.getElementById("wealthGoalFormTitle").innerText = "Nova Meta de Patrimônio";
+        document.getElementById("btnSaveWealthGoal").innerText = "Salvar Meta";
+        btnCancelGoal.style.display = "none";
       };
     }
 
@@ -1411,6 +1774,82 @@ export async function wireSettingsHandlers(rootEl) {
         }
       };
     }
+  }
+
+  // Wealth Goals Link Investments Modal Handles
+  const linkModal = rootEl.querySelector("#modalLinkInvestments");
+  if (linkModal) {
+    // Open Link Modal
+    rootEl.addEventListener("click", async (e) => {
+      const btnLink = e.target.closest("[data-action='link-investments']");
+      if (btnLink) {
+        const goalId = btnLink.dataset.id;
+        const goal = wealthGoals.find(g => g.id === goalId);
+        if (!goal) return;
+
+        rootEl.querySelector("#linkGoalNameStr").innerText = goal.name;
+        rootEl.querySelector("#linkGoalId").value = goalId;
+
+        // Generate checkboxes for boxes
+        const currentLinks = wealthGoalLinks.filter(l => l.goalId === goalId).map(l => l.investmentBoxId);
+
+        let chkHtml = "";
+        if (investmentBoxes.length === 0) {
+          chkHtml = '<div class="small" style="color:#d35400;">Nenhuma Caixinha cadastrada. Crie uma em "Caixinhas" primeiro.</div>';
+        } else {
+          investmentBoxes.sort((a, b) => a.name.localeCompare(b.name)).forEach(box => {
+            const isChecked = currentLinks.includes(box.id) ? "checked" : "";
+            const bal = boxBalancesMap[box.id] || 0;
+            chkHtml += `
+                        <label style="display:flex; align-items:center; gap:8px; padding:5px; border-bottom:1px solid #eaeaea;">
+                            <input type="checkbox" name="boxLink" value="${box.id}" ${isChecked} />
+                            <div style="flex:1;">
+                                <div style="font-weight:bold; font-size:13px;">${esc(box.name)}</div>
+                                <div class="small" style="color:#666;">Saldo BRL: R$ ${bal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                            </div>
+                        </label>
+                    `;
+          });
+        }
+
+        rootEl.querySelector("#investmentsChecklist").innerHTML = chkHtml;
+        linkModal.showModal();
+      }
+    });
+
+    // Close Button
+    rootEl.querySelector("#btnCancelLinkInst").onclick = () => {
+      linkModal.close();
+    };
+
+    // Submitting Link Form
+    const linkForm = rootEl.querySelector("#linkInvestmentsForm");
+    linkForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const goalId = linkForm.querySelector("#linkGoalId").value;
+      const formChecks = linkForm.querySelectorAll("input[name='boxLink']:checked");
+      const selectedBoxIds = Array.from(formChecks).map(chk => chk.value);
+
+      // Delete existing links for this goal
+      const existingLinks = wealthGoalLinks.filter(l => l.goalId === goalId);
+      for (const link of existingLinks) {
+        await remove("wealth_goal_links", link.id);
+      }
+
+      // Create new links
+      for (const boxId of selectedBoxIds) {
+        await put("wealth_goal_links", {
+          id: uid("wgl"),
+          goalId,
+          investmentBoxId: boxId,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      linkModal.close();
+      showToast("success", "Vínculos salvos com sucesso!");
+      await refreshSettings(rootEl);
+    });
   }
 
   // Legacy Goals Handlers removed.

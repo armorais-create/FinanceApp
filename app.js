@@ -1,5 +1,5 @@
-import { list, put, remove, listByIndex, runBackgroundMigrations } from "./db.js";
-import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal, showToast } from "./ui.js?v=2.0";
+import { list, put, remove, listByIndex, runBackgroundMigrations } from "./db.js?v=v2";
+import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal, showToast } from "./ui.js?v=2.1";
 import { drawLineChart, drawGroupedBarChart, exportChartToPNG, getCanvasClickPosition } from "./utils/charts.js";
 import { txScreen, wireTxHandlers } from "./screens/tx.js";
 import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
@@ -13,6 +13,8 @@ import { chartsReportScreen, wireChartsReportHandlers } from "./screens/chartsRe
 import { searchScreen, wireSearchHandlers } from "./screens/search.js";
 import { annualReportScreen, wireAnnualReportHandlers } from "./screens/annualReport.js";
 import { monthlyCloseScreen, wireMonthlyCloseHandlers } from "./screens/monthlyClose.js";
+import { investmentsScreen, wireInvestmentsHandlers } from "./screens/investments.js";
+import { banksScreen, wireBanksHandlers } from "./screens/banks.js";
 import { helpScreen } from "./screens/help.js";
 
 // =========================================
@@ -147,6 +149,11 @@ const screens = {
       const budgetTemplates = await list("budget_templates") || [];
       const budgetOverrides = await list("budget_overrides") || [];
 
+      const wealthGoals = await list("wealth_goals") || [];
+      const wealthGoalLinks = await list("wealth_goal_links") || [];
+      const investmentBoxes = await list("investment_boxes") || [];
+      const investmentMoves = await list("investment_moves") || [];
+
       // 1. Calculate Open Invoices
       const invoices = {};
       for (const t of txs) {
@@ -265,7 +272,44 @@ const screens = {
       budgetProgress.sort((a, b) => b.pct - a.pct);
       const topBudgets = budgetProgress.slice(0, 5);
 
-      // 4. Charts Data Preparation (20A-1)
+      // 4. Wealth Goals (Metas de Patrimônio) Logic
+      const boxBalancesMap = {};
+      investmentBoxes.forEach(box => {
+        const boxMoves = investmentMoves.filter(m => m.boxId === box.id);
+        let balance = 0;
+        boxMoves.forEach(m => {
+          if (m.kind === 'deposit' || m.kind === 'yield') balance += m.value;
+          if (m.kind === 'withdraw') balance -= m.value;
+        });
+        boxBalancesMap[box.id] = balance;
+      });
+
+      const activeWealthGoals = wealthGoals.filter(g => g.active);
+      const wealthProgress = activeWealthGoals.map(g => {
+        const linkedBoxes = wealthGoalLinks.filter(l => l.goalId === g.id);
+        const currentBRL = linkedBoxes.reduce((sum, link) => sum + (boxBalancesMap[link.investmentBoxId] || 0), 0);
+        const targetBRL = (g.targetCentsBRL || 0) / 100;
+        const pctObj = targetBRL > 0 ? (currentBRL / targetBRL) * 100 : 0;
+
+        return {
+          id: g.id,
+          name: g.name,
+          current: currentBRL,
+          target: targetBRL,
+          pct: pctObj,
+          hasLinks: linkedBoxes.length > 0
+        };
+      });
+
+      // Sort by closest to completion, but not 100% yet
+      wealthProgress.sort((a, b) => {
+        if (a.pct >= 100 && b.pct < 100) return 1;
+        if (b.pct >= 100 && a.pct < 100) return -1;
+        return b.pct - a.pct;
+      });
+      const topWealthGoals = wealthProgress.slice(0, 5);
+
+      // 5. Charts Data Preparation (20A-1)
       const last6Months = [];
       const d = new Date();
       for (let i = 5; i >= 0; i--) {
@@ -289,6 +333,35 @@ const screens = {
       window.__homeChartsData = { evolutionData, incExpData, currentMonth };
 
       return `
+        <div class="card">
+          <div><strong style="color:#555;">Atalhos Rápidos</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+            <button class="btn btn-primary" data-action="nav" data-hash="#import">📥 Importar</button>
+            <button class="btn btn-primary" data-action="nav" data-hash="#invoices">💳 Ver Faturas</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#search">🔍 Buscar</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#reports">📊 Painel</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#annual-report">📅 Relatório Anual</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#rejane-report">👩‍💼 Relatório Rejane</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#investments">📦 Caixinhas</button>
+            <button class="btn btn-secondary" id="btnExportPackHome">📦 Backup Rápido</button>
+          </div>
+        </div>
+        
+        <div class="card" style="border: 1px solid #17a2b8;">
+          <div style="color:#17a2b8;"><strong>Contas a Pagar</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+            <button class="btn btn-primary" data-action="nav" data-hash="#bills" style="background:#17a2b8; color:white; border-color:#17a2b8;">📅 Mês Atual</button>
+            <button class="btn btn-secondary" data-action="nav" data-hash="#bills?next" style="background:#fff; color:#17a2b8; border:1px solid #17a2b8;">➡️ Próximos 30 Dias</button>
+          </div>
+        </div>
+
+        <div class="card" style="border: 1px solid #28a745; margin-top:10px;">
+          <div style="color:#28a745;"><strong>Dívidas & Empréstimos</strong></div>
+          <div class="grid" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-top:10px;">
+            <button class="btn btn-success" data-action="nav" data-hash="#loans" style="padding:10px; background:#28a745; border-color:#28a745;">🤝 Controle de Dívidas</button>
+          </div>
+        </div>
+
         <div class="card">
           <div><strong>Resumo de Faturas (Aberto)</strong></div>
           <div style="display:flex; justify-content:space-between; margin-top:10px;">
@@ -319,6 +392,33 @@ const screens = {
                   </div>
                   <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
                     <div style="width:${g.pct}%; background:${color}; height:100%;"></div>
+                  </div>
+                </div>
+              `;
+      }).join("")}
+          </div>
+        </div>
+
+        <div class="card" style="border-left:4px solid #f39c12;">
+          <div><strong style="color:#e67e22;">Metas de Patrimônio</strong></div>
+          <div style="margin-top:10px;">
+            ${activeWealthGoals.length === 0 ? '<div class="small">Nenhuma meta ativa. Configure em Configurações.</div>' : ''}
+            ${topWealthGoals.map(g => {
+        const boundedPct = Math.min(100, g.pct);
+        const color = g.pct >= 100 ? '#27ae60' : (g.pct >= 80 ? '#2980b9' : '#f39c12');
+        let alertHtml = '';
+        if (!g.hasLinks) alertHtml = '<span title="Sem caixinhas" style="color:#d35400;">⚠️ Sem vínculo</span>';
+        else if (g.pct >= 100) alertHtml = '<span title="Meta Concluída" style="color:#27ae60;">🏆 Concluída</span>';
+        else if (g.pct >= 90) alertHtml = '<span title="Quase lá" style="color:#2980b9;">🚀 Quase lá</span>';
+
+        return `
+                <div style="margin-bottom:12px;">
+                  <div style="display:flex; justify-content:space-between; font-size:0.9em; margin-bottom:2px;">
+                    <strong>${esc(g.name)} ${alertHtml}</strong>
+                    <span>R$ ${g.current.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} / ${(g.target).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style="background:#ddd; height:8px; border-radius:4px; overflow:hidden;">
+                    <div style="width:${boundedPct}%; background:${color}; height:100%;"></div>
                   </div>
                 </div>
               `;
@@ -372,35 +472,6 @@ const screens = {
           </div>
         </div>
 
-        <div class="card">
-          <div><strong>Atalhos Rápidos</strong></div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-            <button class="btn btn-primary" data-action="nav" data-hash="#import">📥 Importar</button>
-            <button class="btn btn-primary" data-action="nav" data-hash="#invoices">💳 Ver Faturas</button>
-            <button class="btn btn-primary" data-action="nav" data-hash="#bills">🗓️ Contas a Pagar</button>
-            <button class="btn btn-primary" data-action="nav" data-hash="#loans">🤝 Dívidas</button>
-            <button class="btn btn-secondary" data-action="nav" data-hash="#search">🔍 Buscar</button>
-            <button class="btn btn-secondary" data-action="nav" data-hash="#reports">📊 Painel</button>
-            <button class="btn btn-secondary" data-action="nav" data-hash="#annual-report">📅 Relatório Anual</button>
-            <button class="btn btn-secondary" data-action="nav" data-hash="#rejane-report">👩‍💼 Relatório Rejane</button>
-            <button class="btn btn-secondary" id="btnExportPackHome">📦 Backup Rápido</button>
-          </div>
-        </div>
-        
-        <div class="card" style="border: 1px solid #17a2b8;">
-          <div style="color:#17a2b8;"><strong>Contas a Pagar</strong></div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-            <button class="btn btn-primary" data-action="nav" data-hash="#bills" style="background:#17a2b8; color:white;">📅 Mês Atual</button>
-            <button class="btn btn-secondary" data-action="nav" data-hash="#bills?next" style="background:#fff; color:#17a2b8; border:1px solid #17a2b8;">➡️ Próximos 30 Dias</button>
-          </div>
-        </div>
-
-        <div class="card" style="border: 1px solid #28a745; margin-top:10px;">
-          <div style="color:#28a745;"><strong>Dívidas & Empréstimos</strong></div>
-          <div class="grid" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-top:10px;">
-            <button class="btn btn-success" data-action="nav" data-hash="#loans" style="padding:10px;">🤝 Controle de Dívidas</button>
-          </div>
-        </div>
       `;
     } catch (e) {
       console.error("Home Render Error", e);
@@ -420,6 +491,8 @@ const screens = {
   "annual-report": async () => await annualReportScreen(),
   "monthly-close": async () => await monthlyCloseScreen(),
   search: async () => await searchScreen(),
+  investments: async () => await investmentsScreen(),
+  banks: async () => await banksScreen(),
   help: async () => await helpScreen()
 };
 
@@ -466,6 +539,8 @@ async function setTab(tabKeyRaw) {
     else if (tabKey === "annual-report") await wireAnnualReportHandlers(viewEl);
     else if (tabKey === "monthly-close") await wireMonthlyCloseHandlers(viewEl);
     else if (tabKey === "search") await wireSearchHandlers(viewEl);
+    else if (tabKey === "investments") await wireInvestmentsHandlers(viewEl);
+    else if (tabKey === "banks") await wireBanksHandlers(viewEl);
 
     console.log("[ROUTER] Handlers wired for:", tabKey);
 
@@ -518,7 +593,7 @@ async function wireHomeHandlers(viewEl) {
     const btnExportPackHome = viewEl.querySelector("#btnExportPackHome");
     if (btnExportPackHome) {
       btnExportPackHome.onclick = async () => {
-        const { prepareExportPack } = await import("./ui.js?v=2.0");
+        const { prepareExportPack } = await import("./ui.js?v=2.1");
         await prepareExportPack();
       };
     }

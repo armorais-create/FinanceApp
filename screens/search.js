@@ -1,7 +1,8 @@
 // screens/search.js
 // Global Search and Filters Utilities
 
-import { list, put, get, listByIndex } from "../db.js";
+import { list, put, get, listByIndex } from "../db.js?v=v2";
+import { exportTransactionsCSV } from "../utils/export.js";
 
 export function normalize(str) {
     if (!str) return "";
@@ -182,6 +183,8 @@ let _screenState = {
 
     limit: 50
 };
+
+let _lastSearchDataset = { all: [], visible: [], caches: {} };
 
 export async function searchScreen() {
     // Carregar options
@@ -382,9 +385,12 @@ export async function searchScreen() {
     // Ordenação (Mais recente primeiro)
     filtered.sort((a, b) => b.date.localeCompare(a.date));
 
-    // Paginação
-    const totalResults = filtered.length;
-    const paginated = filtered.slice(0, _screenState.limit);
+    // Save dataset for Export CSV later
+    _lastSearchDataset = {
+        all: filtered,
+        visible: paginated,
+        caches: { categories, subcategories, accounts, cards, people }
+    };
 
     // Helpers UI
     const esc = (s) => (s ?? "").toString().replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -400,7 +406,10 @@ export async function searchScreen() {
         <div class="card" style="margin-bottom: 10px; padding: 15px; background: #fff; border: 1px solid #ced4da; border-radius: 6px;">
             <div style="font-weight: bold; font-size: 1.2em; margin-bottom: 15px; display:flex; align-items:center; justify-content:space-between;">
                 <span>Busca Avançada</span>
-                <button class="secondary small btnClearSearch" style="font-size:0.8em;">Limpar Tudo</button>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <button class="secondary small btnClearSearch" style="font-size:0.8em;">Limpar Tudo</button>
+                    <button id="btnExportSearch" class="btn secondary small">📊 Exportar CSV</button>
+                </div>
             </div>
             
             <input type="text" id="mainSearchInput" placeholder="Buscar qualquer termo..." value="${esc(_screenState.query)}" style="width:100%; padding:10px; font-size:1.1em; border-radius:6px; border:1px solid #ccc; margin-bottom: 15px;">
@@ -557,6 +566,29 @@ ${totalResults > _screenState.limit ? `
         <div class="small" style="color:#666; margin-top:5px;">Exibindo ${_screenState.limit} de ${totalResults}</div>
      </div>
 ` : ''}
+
+    <!-- Modal Export Search -->
+    <div id="modalExportSearch" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Exportar Busca (CSV)</h3>
+            <p>Escolha o que deseja exportar com base nos filtros da busca:</p>
+            <div style="margin: 15px 0;">
+                <label style="display:block; margin-bottom:10px;">
+                    <input type="radio" name="exportSearchMode" value="visible" checked>
+                    Apenas os <b id="schExpVisibleCount">0</b> itens exibidos na tela atual
+                </label>
+                <label style="display:block;">
+                    <input type="radio" name="exportSearchMode" value="all">
+                    Todos os <b id="schExpAllCount">0</b> itens que correspondem à busca
+                </label>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button id="btnCancelExportSearch" class="btn btn-ghost">Cancelar</button>
+                <button id="btnConfirmExportSearch" class="btn btn-primary">Baixar CSV</button>
+            </div>
+        </div>
+    </div>
+
 </div>
 `;
 }
@@ -665,5 +697,43 @@ export async function wireSearchHandlers(rootEl) {
             _screenState.limit += 50;
             refresh();
         });
+    }
+
+    // Export Logic
+    const btnExportSearch = rootEl.querySelector("#btnExportSearch");
+    const modalExportSearch = rootEl.querySelector("#modalExportSearch");
+    const btnCancelExportSearch = rootEl.querySelector("#btnCancelExportSearch");
+    const btnConfirmExportSearch = rootEl.querySelector("#btnConfirmExportSearch");
+
+    if (btnExportSearch && modalExportSearch) {
+        btnExportSearch.onclick = () => {
+            const expVisible = rootEl.querySelector("#schExpVisibleCount");
+            const expAll = rootEl.querySelector("#schExpAllCount");
+            if (expVisible) expVisible.innerText = _lastSearchDataset.visible.length;
+            if (expAll) expAll.innerText = _lastSearchDataset.all.length;
+
+            if (_lastSearchDataset.all.length === _lastSearchDataset.visible.length || _lastSearchDataset.all.length === 0) {
+                // Generate raw transaction objects properly
+                const rows = _lastSearchDataset.all.map(u => ({ ...u.original, rawType: u.rawType }));
+                const filename = `FinanceApp_Busca_${new Date().toISOString().substring(0, 10)}.csv`;
+                exportTransactionsCSV(rows, _lastSearchDataset.caches, filename);
+            } else {
+                modalExportSearch.classList.add("active");
+            }
+        };
+
+        btnCancelExportSearch.onclick = () => {
+            modalExportSearch.classList.remove("active");
+        };
+
+        btnConfirmExportSearch.onclick = () => {
+            const mode = rootEl.querySelector('input[name="exportSearchMode"]:checked').value;
+            const targetData = mode === "all" ? _lastSearchDataset.all : _lastSearchDataset.visible;
+            const rows = targetData.map(u => ({ ...u.original, rawType: u.rawType }));
+            const filename = `FinanceApp_Busca_${new Date().toISOString().substring(0, 10)}.csv`;
+
+            exportTransactionsCSV(rows, _lastSearchDataset.caches, filename);
+            modalExportSearch.classList.remove("active");
+        };
     }
 }

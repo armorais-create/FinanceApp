@@ -1,7 +1,8 @@
-import { list, get, put, remove, uid } from "../db.js";
+import { list, get, put, remove, uid, listInvestmentBoxes, computeBoxBalance, listMovesByBoxId } from "../db.js?v=v2";
 import { drawBarChart, exportChartToPNG } from "../utils/charts.js";
-import { prepareExportPack } from "../ui.js?v=2.0";
+import { prepareExportPack } from "../ui.js?v=2.1";
 import { exportCSV } from "../utils/export.js";
+import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
 /* =========================================
    STATE
@@ -77,6 +78,7 @@ export async function reportsScreen() {
             <label class="export-opt"><input type="checkbox" id="chkRptCat"> Despesas por Categoria</label>
             <label class="export-opt"><input type="checkbox" id="chkRptTag"> Despesas por Tag</label>
             <label class="export-opt"><input type="checkbox" id="chkRptAcc"> Balanço por Conta</label>
+            <label class="export-opt"><input type="checkbox" id="chkRptInv"> Resumo de Investimentos</label>
 
             <div class="export-actions">
                 <button class="btn btn-outline" id="btnCancelCsvRpt">Cancelar</button>
@@ -328,14 +330,6 @@ async function renderReports(cnt) {
             ${quickFilterLabel}
         </div>
 
-        ${displayTxs.length === 0 ? `
-            <div class="card" style="text-align:center; padding: 40px 20px; margin-top:15px;">
-                <div style="font-size:3em; margin-bottom:10px;">📊</div>
-                <h3>Sem dados para este período</h3>
-                <p style="color:#666; margin-bottom:20px;">Não encontramos lançamentos para os filtros e mês selecionados. Adicione novos lançamentos e retorne para visualizar os gráficos.</p>
-                <button class="btn btn-primary" onclick="location.hash='#tx'">Novo Lançamento</button>
-            </div>
-        ` : `
         <div id="reportsToggleContainer" style="display:flex; justify-content:center; gap:10px; margin-top:15px; margin-bottom: 10px;">
              <button class="btn ${state.filters.viewMode === 'dashboard' ? 'btn-primary' : 'btn-outline'}" style="flex:1;" data-action="reports-view" data-view="dashboard">📊 Painel Geral</button>
              <button class="btn ${state.filters.viewMode === 'details' ? 'btn-primary' : 'btn-outline'}" style="flex:1;" data-action="reports-view" data-view="details">📝 Detalhamento</button>
@@ -343,7 +337,6 @@ async function renderReports(cnt) {
         
         <div id="reportsBody">
         </div>
-        `}
     </div>
     `; // End of main outer HTML
 
@@ -359,10 +352,13 @@ async function renderReports(cnt) {
                 renderAlertsOverview(cnt, state.filters, month);
                 renderChecklistView(cnt, month);
                 calcOpenInvoices(cnt, state.cache.txs, state.filters);
+                calcInvestmentsCard(cnt, month, state.filters, state.cache.txs);
             }, 0);
         } else {
             if (displayTxs.length === 0) {
-                viewArea.innerHTML = `<div class="card" style="text-align:center; padding: 20px;">Sem dados para o período/filtros selecionados.</div>`;
+                viewArea.innerHTML = `<div class="card" style="text-align:center; padding: 20px;">Sem dados para o período/filtros selecionados.</div>
+                                      <div id="detailsInvestmentsContainer"></div>`;
+                setTimeout(() => renderDetailsInvestments(cnt, month, state.filters), 0);
             } else {
                 viewArea.innerHTML = `
                     <div class="grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
@@ -373,7 +369,10 @@ async function renderReports(cnt) {
                     <div style="margin-top:10px;">
                         ${renderTopTransactions(displayTxs)}
                     </div>
+                    
+                    <div id="detailsInvestmentsContainer" style="margin-top:10px;"></div>
                 `;
+                setTimeout(() => renderDetailsInvestments(cnt, month, state.filters), 0);
             }
         }
 
@@ -412,7 +411,7 @@ async function renderReports(cnt) {
         btnExport.onclick = () => modalCsv.classList.add("active");
         btnCancelCsv.onclick = () => modalCsv.classList.remove("active");
 
-        btnConfirmCsv.onclick = () => {
+        btnConfirmCsv.onclick = async () => {
             const prefix = `FinanceApp_Rpt_${month}`;
 
             // 1. Resumo
@@ -481,6 +480,39 @@ async function renderReports(cnt) {
                     csvAcc.push([aName, g.rev, g.exp, g.rev - g.exp]);
                 });
                 exportCSV(csvAcc, `${prefix}_contas.csv`);
+            }
+
+            // 5. Investments
+            if (document.getElementById("chkRptInv") && document.getElementById("chkRptInv").checked) {
+                const csvInv = [["Banco / Conta", "Investimento", "Saldo Atual", "Aportes (Mês)", "Rendimentos (Mês)", "Retiradas (Mês)"]];
+                try {
+                    const boxes = await listInvestmentBoxes();
+                    for (const box of boxes) {
+                        // Respeitar filtro de conta
+                        if (state.filters.accountId && box.accountId !== state.filters.accountId) continue;
+                        if (state.filters.personId && box.personId && box.personId !== state.filters.personId) continue;
+
+                        const { balanceBRL } = await computeBoxBalance(box.id);
+
+                        let mDeposit = 0, mYield = 0, mWithdraw = 0;
+                        const moves = await listMovesByBoxId(box.id);
+                        moves.forEach(m => {
+                            if (m.date && m.date.startsWith(month)) {
+                                if (m.kind === "deposit") mDeposit += (m.amountBRL || 0);
+                                if (m.kind === "yield") mYield += (m.amountBRL || 0);
+                                if (m.kind === "withdraw") mWithdraw += (m.amountBRL || 0);
+                            }
+                        });
+
+                        const acc = state.cache.accounts.find(a => a.id === box.accountId);
+                        const accName = acc ? acc.name : "Sem Banco";
+
+                        csvInv.push([accName, box.name || "N/D", balanceBRL, mDeposit, mYield, mWithdraw]);
+                    }
+                    exportCSV(csvInv, `${prefix}_investimentos.csv`);
+                } catch (e) {
+                    console.error("Erro exportando investimentos", e);
+                }
             }
 
             modalCsv.classList.remove("active");
@@ -644,6 +676,16 @@ function renderDashboardView(currentTxs, prevTxs, month, filters, cache, curr, p
                     </div>
                     <div style="text-align:right;">${renderDelta(curr.bal, prev.bal)}</div>
                 </div>
+            </div>
+
+            <div class="card" id="dashCardPatrimony">
+                <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Patrimônio</h3>
+                <div style="display:flex; justify-content:center; align-items:center; height:80px; color:#999; font-size:12px;">Carregando...</div>
+            </div>
+
+            <div class="card" id="dashCardInvestmentsMonth">
+                <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Investimentos (Mês)</h3>
+                <div style="display:flex; justify-content:center; align-items:center; height:80px; color:#999; font-size:12px;">Carregando...</div>
             </div>
 
             <div class="card">
@@ -815,7 +857,7 @@ function renderAccountTable(txs) {
 
     Object.keys(groups).forEach(aid => {
         const acc = state.cache.accounts.find(a => a.id === aid);
-        const name = acc ? acc.name : "Outros";
+        const name = acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "Outros";
         const g = groups[aid];
         html += `
             <tr>
@@ -1153,6 +1195,246 @@ function calcOpenInvoices(cnt, txs, flt) {
             <div style="font-size:1.2em; color:#007bff;">${count}</div>
             <div class="small" style="color:#dc3545;">${fmtBRL(debt)}</div>
         `;
+    }
+}
+
+async function calcInvestmentsCard(cnt, currentMonth, filters, allTxs) {
+    const dCardPatrimony = cnt.querySelector("#dashCardPatrimony");
+    const dCardMonth = cnt.querySelector("#dashCardInvestmentsMonth");
+    if (!dCardPatrimony && !dCardMonth) return;
+
+    try {
+        const boxes = await listInvestmentBoxes();
+        let totalInvestmentsBRL = 0;
+        let monthYieldBRL = 0;
+        let monthDepositBRL = 0;
+        let monthWithdrawBRL = 0;
+
+        for (const box of boxes) {
+            // Respeitar filtro de conta
+            if (filters.accountId && box.accountId !== filters.accountId) continue;
+            // Respeitar filtro de pessoa (se nulo/vazio no box, considerar global)
+            if (filters.personId && box.personId && box.personId !== filters.personId) continue;
+
+            const { balanceBRL } = await computeBoxBalance(box.id);
+            totalInvestmentsBRL += balanceBRL;
+
+            const moves = await listMovesByBoxId(box.id);
+            moves.forEach(m => {
+                if (m.date && m.date.startsWith(currentMonth)) {
+                    if (m.kind === "yield") monthYieldBRL += (m.amountBRL || 0);
+                    if (m.kind === "deposit") monthDepositBRL += (m.amountBRL || 0);
+                    if (m.kind === "withdraw") monthWithdrawBRL += (m.amountBRL || 0);
+                }
+            });
+        }
+
+        // Calcula Saldo Caixa (All Time)
+        let totalCashBRL = 0;
+        if (allTxs) {
+            allTxs.forEach(t => {
+                // Apply same filters (except month) to cash
+                if (filters.personId && t.personId !== filters.personId) return;
+                if (filters.accountId && t.accountId !== filters.accountId && t.sourceAccountId !== filters.accountId) return;
+
+                const val = t.valueBRL ?? t.value;
+                if (t.type === 'revenue') totalCashBRL += val;
+                else if (t.type === 'expense') totalCashBRL -= val;
+            });
+        }
+
+        const patrimonyTotal = totalInvestmentsBRL + totalCashBRL;
+
+        if (dCardPatrimony) {
+            dCardPatrimony.innerHTML = `
+                <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;">
+                    <span>🏦 Patrimônio Total</span>
+                </h3>
+                <div style="font-size:22px; font-weight:bold; color:#28a745; margin-top:5px; margin-bottom:10px; text-align:center;">
+                    ${fmtBRL(patrimonyTotal)}
+                </div>
+                <div style="border-top:1px dashed #eee; padding-top:5px; display:flex; flex-direction:column; gap:3px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:11px; color:#666;">📈 Investimentos:</span>
+                        <span style="font-size:12px; font-weight:bold; color:#17a2b8;">${fmtBRL(totalInvestmentsBRL)}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:11px; color:#666;">💵 Caixa / Contas:</span>
+                        <span style="font-size:12px; font-weight:bold; color:#333;">${fmtBRL(totalCashBRL)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (dCardMonth) {
+            dCardMonth.innerHTML = `
+                <h3 style="margin-top:0; color:#333; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px; display:flex; justify-content:space-between;">
+                    <span>📈 Investimentos (Mês)</span>
+                </h3>
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:11px; color:#666; text-transform:uppercase;">Aportes:</div>
+                        <div style="font-size:14px; font-weight:bold; color:#28a745;">+${fmtBRL(monthDepositBRL)}</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:11px; color:#666; text-transform:uppercase;">Rendimentos:</div>
+                        <div style="font-size:14px; font-weight:bold; color:#17a2b8;">+${fmtBRL(monthYieldBRL)}</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:11px; color:#666; text-transform:uppercase;">Retiradas:</div>
+                        <div style="font-size:14px; font-weight:bold; color:#dc3545;">-${fmtBRL(monthWithdrawBRL)}</div>
+                    </div>
+                </div>
+            `;
+            dCardMonth.style.cursor = "pointer";
+            dCardMonth.onclick = () => location.hash = "#investments";
+        }
+
+    } catch (e) {
+        console.error("Erro investments card", e);
+        if (dCardPatrimony) dCardPatrimony.innerHTML = '<div style="color:red; font-size:12px;">Erro ao carregar patrimônio</div>';
+        if (dCardMonth) dCardMonth.innerHTML = '<div style="color:red; font-size:12px;">Erro ao carregar investimentos</div>';
+    }
+}
+
+async function renderDetailsInvestments(cnt, currentMonth, filters) {
+    const container = cnt.querySelector("#detailsInvestmentsContainer");
+    if (!container) return;
+
+    try {
+        const boxes = await listInvestmentBoxes();
+
+        let hasInvs = false;
+        const boxData = [];
+        const allYields = [];
+
+        for (const box of boxes) {
+            // Apply Account and Person filters
+            if (filters.accountId && box.accountId !== filters.accountId) continue;
+            if (filters.personId && box.personId && box.personId !== filters.personId) continue;
+
+            const { balanceBRL } = await computeBoxBalance(box.id);
+            const moves = await listMovesByBoxId(box.id);
+
+            let mDeposit = 0;
+            let mYield = 0;
+
+            moves.forEach(m => {
+                if (m.date && m.date.startsWith(currentMonth)) {
+                    if (m.kind === "deposit") mDeposit += (m.amountBRL || 0);
+                    if (m.kind === "yield") {
+                        const yv = m.amountBRL || 0;
+                        mYield += yv;
+                        allYields.push({
+                            invName: box.name,
+                            accountId: box.accountId,
+                            yieldVal: yv,
+                            date: m.date
+                        });
+                    }
+                }
+            });
+
+            boxData.push({
+                box: box,
+                balance: balanceBRL,
+                deposit: mDeposit,
+                yield: mYield
+            });
+            hasInvs = true;
+        }
+
+        if (!hasInvs) {
+            container.innerHTML = `<div class="card small" style="color:#999; text-align:center;">Sem investimentos para os filtros selecionados.</div>`;
+            return;
+        }
+
+        // --- Table 1: Investimentos por Banco ---
+        let htmlBank = `
+            <div class="card" style="margin-bottom:10px;">
+                <h3 style="margin-top:0; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Investimentos por Banco / Conta</h3>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; font-size:12px; border-collapse:collapse; min-width:400px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #ccc; color:#666; text-align:left;">
+                                <th style="padding:5px;">Banco / Conta</th>
+                                <th style="padding:5px;">Investimento</th>
+                                <th style="padding:5px; text-align:right;">Saldo Atual</th>
+                                <th style="padding:5px; text-align:right;">Aportes (Mês)</th>
+                                <th style="padding:5px; text-align:right;">Rendimentos (Mês)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+
+        boxData.sort((a, b) => b.balance - a.balance).forEach(row => {
+            const acc = state.cache.accounts.find(a => a.id === row.box.accountId);
+            const accName = acc ? `${getBrandIcon(acc.brandKey)} ${acc.name}` : "Sem Banco";
+
+            htmlBank += `
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:4px;">${esc(accName)}</td>
+                                <td style="padding:4px;"><strong>${esc(row.box.name)}</strong></td>
+                                <td style="padding:4px; text-align:right; font-weight:bold;">${fmtBRL(row.balance)}</td>
+                                <td style="padding:4px; text-align:right; color:#28a745;">${row.deposit > 0 ? '+' + fmtBRL(row.deposit) : '-'}</td>
+                                <td style="padding:4px; text-align:right; color:#17a2b8;">${row.yield !== 0 ? (row.yield > 0 ? '+' : '') + fmtBRL(row.yield) : '-'}</td>
+                            </tr>
+            `;
+        });
+        htmlBank += `</tbody></table></div></div>`;
+
+        // --- Table 2: Top 5 Rendimentos ---
+        // Aggregate yields by investment if there are multiple yield moves
+        const groupedYields = {};
+        allYields.forEach(y => {
+            const k = y.invName + (y.accountId || 'null');
+            if (!groupedYields[k]) {
+                groupedYields[k] = { name: y.invName, accId: y.accountId, val: 0 };
+            }
+            groupedYields[k].val += y.yieldVal;
+        });
+
+        const topYields = Object.values(groupedYields).sort((a, b) => b.val - a.val).slice(0, 5);
+
+        let htmlYields = `
+            <div class="card">
+                <h3 style="margin-top:0; font-size:14px; border-bottom:1px solid #eee; padding-bottom:5px;">Top Rendimentos (Mês)</h3>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; font-size:12px; border-collapse:collapse; min-width:300px;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #ccc; color:#666; text-align:left;">
+                                <th style="padding:5px;">Investimento (Conta)</th>
+                                <th style="padding:5px; text-align:right;">Rendimento</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        if (topYields.length === 0) {
+            htmlYields += `<tr><td colspan="2" style="text-align:center; padding:10px; color:#999;">Sem rendimentos no mês.</td></tr>`;
+        } else {
+            topYields.forEach(y => {
+                const acc = state.cache.accounts.find(a => a.id === y.accId);
+                const accName = acc ? `${getBrandIcon(acc.brandKey)}` : "Sem Banco";
+                htmlYields += `
+                                <tr style="border-bottom:1px solid #eee;">
+                                    <td style="padding:4px;">${esc(y.name)} <small>(${esc(accName)})</small></td>
+                                    <td style="padding:4px; text-align:right; color:#17a2b8; font-weight:bold;">${y.val > 0 ? '+' : ''}${fmtBRL(y.val)}</td>
+                                </tr>
+                `;
+            });
+        }
+        htmlYields += `</tbody></table></div></div>`;
+
+        container.innerHTML = `
+            <div class="grid" style="grid-template-columns: 1fr; gap:10px;">
+                ${htmlBank}
+                ${htmlYields}
+            </div>
+        `;
+
+    } catch (e) {
+        console.error("Erro renderDetailsInvestments", e);
+        container.innerHTML = '<div style="color:red; font-size:12px;">Erro ao carregar detalhamento de investimentos</div>';
     }
 }
 
