@@ -1,6 +1,6 @@
 import { list, put, uid, get } from "../db.js?v=v2";
 import { setInvoiceState } from "./invoice.js";
-import { importer } from "../utils/importer.js";
+import { importer } from "../utils/importer.js?v=2.2";
 import { applyRulesToMany } from "../rules_engine.js";
 import { getBrandIcon } from "../utils/brand.js?v=2.1";
 
@@ -290,59 +290,81 @@ function renderStep1(cnt) {
         try {
             // Processing in next tick to allow UI to update
             setTimeout(async () => {
-                try {
-                    const result = await importer.parseFile(state.file, {
-                        accountId: state.dest.importType === "account" ? state.dest.accountId : null
-                    });
+                let pwd = undefined;
+                let retry = true;
+                while (retry) {
+                    try {
+                        const result = await importer.parseFile(state.file, {
+                            accountId: state.dest.importType === "account" ? state.dest.accountId : null,
+                            password: pwd
+                        });
+                        retry = false;
 
-                    console.log(`[IMPORT][CSV] Parsed rows length: ${result.rows.length}`);
-                    if (result.rows.length === 0) {
-                        throw new Error("Nenhum item encontrado. Verifique se o arquivo é válido.");
-                    }
-
-                    // Map to internal state rows
-                    state.rows = result.rows.map(r => {
-                        let desc = r.description;
-                        // Use raw text for initial description setup based on fallback preferences (only OFX/QIF have rawName/Memo)
-                        if (state.dest.importType === "account" && r.rawMemo !== undefined) {
-                            if (state.dest.descFallback === "name") desc = r.rawName || r.rawMemo || "Extrato OFX";
-                            else if (state.dest.descFallback === "both") desc = [r.rawName, r.rawMemo].filter(Boolean).join(" - ") || "Extrato OFX";
-                            else desc = r.rawMemo || r.rawName || "Extrato OFX";
+                        console.log(`[IMPORT][CSV] Parsed rows length: ${result.rows.length}`);
+                        if (result.rows.length === 0) {
+                            throw new Error("Nenhum item encontrado. Verifique se o arquivo é válido.");
                         }
 
-                        return {
-                            id: r.id,
-                            date: r.dateISO, // Map dateISO -> date
-                            description: desc,
-                            rawName: r.rawName,
-                            rawMemo: r.rawMemo,
-                            value: r.amount, // Map amount -> value
-                            currency: r.currency || "BRL",
-                            fitid: r.fitid || "", // For OFX/QIF deduplication
-                            categoryId: r.categoryId || "",
-                            subcategoryId: r.subcategoryId || "",
+                        state.rows = result.rows.map(r => {
+                            let desc = r.description;
+                            if (state.dest.importType === "account" && r.rawMemo !== undefined) {
+                                if (state.dest.descFallback === "name") desc = r.rawName || r.rawMemo || "Extrato OFX";
+                                else if (state.dest.descFallback === "both") desc = [r.rawName, r.rawMemo].filter(Boolean).join(" - ") || "Extrato OFX";
+                                else desc = r.rawMemo || r.rawName || "Extrato OFX";
+                            }
 
-                            cardType: r.cardUsageType || "fisico", // 'fisico' | 'virtual'
-                            payerRole: r.payerRole || "main",      // 'main' | 'additional'
-                            accountId: state.dest.importType === "account" ? state.dest.accountId : "",
+                            let matchedPersonId = "";
+                            if (state.dest.importType === "card" && r.cardName) {
+                                const first = r.cardName.trim().split(" ")[0].toLowerCase();
+                                const pm = state.cache.people.find(p => p.name.toLowerCase().startsWith(first));
+                                if (pm) matchedPersonId = pm.id;
+                            }
 
-                            selected: r.selected !== false,
-                            warnings: r.warnings || [],
-                            raw: r.raw
-                        };
-                    });
+                            return {
+                                id: r.id,
+                                date: r.dateISO,
+                                description: desc,
+                                rawName: r.rawName,
+                                rawMemo: r.rawMemo,
+                                value: r.amount,
+                                currency: r.currency || "BRL",
+                                fitid: r.fitid || "",
+                                categoryId: r.categoryId || "",
+                                subcategoryId: r.subcategoryId || "",
+                                cardType: r.cardUsageType || "fisico",
+                                payerRole: r.payerRole || "main",
+                                personId: matchedPersonId,
+                                accountId: state.dest.importType === "account" ? state.dest.accountId : "",
+                                last4: r.last4,
+                                cardName: r.cardName,
+                                selected: r.selected !== false,
+                                warnings: r.warnings || [],
+                                raw: r.raw
+                            };
+                        });
 
-                    // --- APPLY RULES (Block 9B) ---
-                    await applyRulesToStateRows();
-                    // ------------------------------
+                        await applyRulesToStateRows();
 
-                    state.step = 2;
-                    renderDispatcher(cnt);
-                } catch (err) {
-                    console.error("[IMPORT][CSV] Error:", err);
-                    alert("Erro ao ler arquivo: " + err.message);
-                    btnNext.textContent = "Carregar e Visualizar »";
-                    btnNext.disabled = false;
+                        state.step = 2;
+                        renderDispatcher(cnt);
+                    } catch (err) {
+                        if (err.message === "PASSWORD_REQUIRED") {
+                            const p = prompt("Este PDF é protegido por senha. Por favor, digite a senha (ela não será salva):");
+                            if (p) {
+                                pwd = p;
+                                continue;
+                            } else {
+                                alert("A importação foi cancelada pois a senha não foi fornecida.");
+                                retry = false;
+                            }
+                        } else {
+                            console.error("[IMPORT][CSV] Error:", err);
+                            alert("Erro ao ler arquivo: " + err.message);
+                            retry = false;
+                        }
+                        btnNext.textContent = "Carregar e Visualizar »";
+                        btnNext.disabled = false;
+                    }
                 }
             }, 50);
         } catch (e) {
@@ -380,6 +402,7 @@ function renderStep2(cnt) {
         <div style="display:flex; justify-content:space-between; align-items:center;">
              <h3>2. Pré-visualização (${state.rows.length} itens)</h3>
              <div class="small">
+                <span id="invalidValuesCount" style="color:red; font-weight:bold; margin-right:15px; display:none;"></span>
                 <label><input type="checkbox" id="chkAll" checked> Selecionar Todos</label>
              </div>
         </div>
@@ -410,10 +433,8 @@ function renderStep2(cnt) {
                         <th width="110">Categoria</th>
                         <th width="110">Subcat</th>
                         ${state.dest.importType === 'card' ? `
-                            <th width="70">Parc.</th>
-                            <th width="60">Atual</th>
                             <th width="80">Tipo</th>
-                            <th width="90">Pagador</th>
+                            <th width="110">Pagador</th>
                         ` : ''}
                     </tr>
                 </thead>
@@ -430,6 +451,20 @@ function renderStep2(cnt) {
         </div>
     `;
 
+    // --- HELPER FUNCTION FOR MISSING VALUES COUNT ---
+    function updateInvalidCount() {
+        const cntMissing = state.rows.filter(r => r.value === null).length;
+        const badge = cnt.querySelector("#invalidValuesCount");
+        if (badge) {
+            if (cntMissing > 0) {
+                badge.innerText = `⚠️ ${cntMissing} linha(s) sem valor detectado!`;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    }
+
     // --- HANDLERS ---
 
     cnt.querySelector(".backBtn").onclick = () => {
@@ -442,6 +477,14 @@ function renderStep2(cnt) {
     cnt.querySelector(".nextBtn").onclick = () => {
         const hasSelected = state.rows.some(r => r.selected);
         if (!hasSelected) return alert("Selecione pelo menos um item para importar.");
+
+        const hasNulls = state.rows.some(r => r.selected && r.value === null);
+        if (hasNulls && !confirm("Atenção: Existem itens selecionados SEM VALOR. Deseja ignorá-los e continuar (eles serão salvos com valor 0.00)?")) {
+            return;
+        }
+        // Force nulls to 0 before saving if they decided to continue
+        state.rows.forEach(r => { if (r.selected && r.value === null) r.value = 0; });
+
         state.step = 3;
         renderDispatcher(cnt);
     };
@@ -492,9 +535,13 @@ function renderStep2(cnt) {
                 <td><input type="date" class="rowDate smallInput" data-idx="${i}" value="${r.date || ''}" style="width:100%"></td>
                 <td>
                     <input type="text" class="rowDesc smallInput" data-idx="${i}" value="${esc(r.description)}" style="width:100%">
-                    <div style="margin-top:2px;">${autoBadge} ${r.appliedRules && r.appliedRules.length ? `<span style="font-size:10px; color:#555;">(Regra aplicada)</span>` : ''}</div>
+                    <div style="margin-top:2px;">
+                        ${autoBadge} 
+                        ${r.appliedRules && r.appliedRules.length ? `<span style="font-size:10px; color:#555;">(Regra aplicada)</span>` : ''}
+                        ${state.dest.importType === 'card' && (r.cardName || r.last4) ? `<div style="font-size:10px; color:#666; margin-top:2px;">Cartão: ${r.last4 ? '****'+r.last4 : 'N/A'} • Nome: ${esc(r.cardName || 'N/D')}</div>` : ''}
+                    </div>
                 </td>
-                <td><input type="number" step="0.01" class="rowVal smallInput" data-idx="${i}" value="${r.value}" style="width:100%"></td>
+                <td><input type="number" step="0.01" class="rowVal smallInput ${r.value === null ? 'error-input' : ''}" data-idx="${i}" value="${r.value === null ? '' : r.value}" placeholder="0.00" style="width:100%; box-sizing:border-box;"></td>
                 
                 <td>
                     <select class="rowCat smallInput" data-idx="${i}" style="width:100%">
@@ -509,21 +556,15 @@ function renderStep2(cnt) {
                 
                 ${state.dest.importType === 'card' ? `
                     <td>
-                        <input type="number" class="rowTotalInst smallInput" data-idx="${i}" value="${r.totalInstallments || 1}" min="1" max="99" style="width:100%">
-                    </td>
-                    <td>
-                        <input type="number" class="rowCurrInst smallInput" data-idx="${i}" value="${r.currentInstallment || 1}" min="1" max="99" style="width:100%">
-                    </td>
-                    <td>
                         <select class="rowType smallInput" data-idx="${i}" style="width:100%">
                             <option value="fisico" ${r.cardType === 'fisico' ? 'selected' : ''}>Físico</option>
                             <option value="virtual" ${r.cardType === 'virtual' ? 'selected' : ''}>Virtual</option>
                         </select>
                     </td>
                     <td>
-                        <select class="rowPay smallInput" data-idx="${i}" style="width:100%">
-                            <option value="main" ${r.payerRole === 'main' ? 'selected' : ''}>Titular</option>
-                            <option value="additional" ${r.payerRole === 'additional' ? 'selected' : ''}>Adicional</option>
+                        <select class="rowReqPerson smallInput" data-idx="${i}" style="width:100%">
+                            <option value="">(Titular)</option>
+                            ${state.cache.people.map(p => `<option value="${p.id}" ${r.personId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
                         </select>
                     </td>
                 ` : ''}
@@ -561,7 +602,16 @@ function renderStep2(cnt) {
         const row = state.rows[idx];
 
         if (el.classList.contains("rowDesc")) row.description = el.value;
-        if (el.classList.contains("rowVal")) row.value = parseFloat(el.value) || 0;
+        if (el.classList.contains("rowVal")) {
+            row.value = el.value === "" ? null : parseFloat(el.value);
+            if (row.value === null || isNaN(row.value)) {
+                row.value = null;
+                el.classList.add("error-input");
+            } else {
+                el.classList.remove("error-input");
+            }
+            updateInvalidCount();
+        }
         if (el.classList.contains("rowDate")) row.date = el.value;
     });
 
@@ -584,10 +634,10 @@ function renderStep2(cnt) {
         }
 
         if (el.classList.contains("rowSub")) row.subcategoryId = el.value;
-        if (el.classList.contains("rowTotalInst")) row.totalInstallments = parseInt(el.value) || 1;
-        if (el.classList.contains("rowCurrInst")) row.currentInstallment = parseInt(el.value) || 1;
+        // Removed Parc
+        // Removed Atual
         if (el.classList.contains("rowType")) row.cardType = el.value;
-        if (el.classList.contains("rowPay")) row.payerRole = el.value;
+        if (el.classList.contains("rowReqPerson")) row.personId = el.value;
     });
 
     // Custom controls
@@ -622,10 +672,12 @@ function renderStep2(cnt) {
     style.innerHTML = `
         .smallInput { border:1px solid #ccc; border-radius:3px; padding:2px; font-size:11px; }
         .warning-row { background-color: #fff8e1; }
+        .error-input { border: 2px solid red !important; outline: none; background: #ffe6e6; }
         tbody tr:hover { background-color: #f0f8ff; }
     `;
     cnt.appendChild(style);
 
+    updateInvalidCount();
     setTimeout(renderChunk, 0);
 }
 
@@ -1272,6 +1324,45 @@ async function startImportProcess(cnt) {
                     cardHolder: (row.payerRole === "main" || row.payerRole === "additional")
                         ? row.payerRole : state.dest.cardHolder
                 };
+
+                // Dívida a Receber Auto-Creation
+                if (row.personId && row.personId !== "" && isExpense && absoluteValue > 0) {
+                    const existingDebtId = uid("loan_impt");
+                    const loan = {
+                        id: existingDebtId,
+                        title: `Ref: ${finalTx.description}`,
+                        role: 'owed_to_me',
+                        borrowerPersonId: row.personId,
+                        lenderPersonId: "", 
+                        principal: absoluteValue,
+                        currency: finalTx.currency,
+                        startDate: finalTx.date,
+                        totalInstallments: 1,
+                        installmentAmount: absoluteValue,
+                        dueDay: parseInt(finalTx.date.split("-")[2], 10) || 10,
+                        notes: `Gerado automaticamente da importação de cartão.\nData: ${finalTx.date}\nFatura: ${state.dest.invoiceMonth}`,
+                        status: 'open',
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                        import_session_id: state.importSessionId
+                    };
+                    try {
+                        await put("loans", loan);
+                        const inst = {
+                            id: uid("loan_inst"),
+                            loanId: loan.id,
+                            installmentNo: 1,
+                            installmentTotal: 1,
+                            dueDate: loan.startDate,
+                            amount: absoluteValue,
+                            status: 'open',
+                            createdAt: loan.createdAt
+                        };
+                        await put("loan_installments", inst);
+                    } catch(er) {
+                        console.warn("Could not auto-create debt receivable", er);
+                    }
+                }
             } else {
                 // Account Export Structure (OFX/QIF)
                 const importIdBase = row.fitid || undefined;

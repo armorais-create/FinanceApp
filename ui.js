@@ -1,6 +1,6 @@
 import { list, put, remove, uid, get, exportDB, importDB, clearDB, resetDB } from "./db.js?v=v2";
 import { APP_VERSION } from "./app.js";
-import { getBrandIcon, SUPPORTED_BRANDS } from "./utils/brand.js?v=2.1";
+import { getBrandIcon, SUPPORTED_BANKS, SUPPORTED_CARDS } from "./utils/brand.js?v=2.2";
 
 function esc(s) {
   return (s ?? "").toString()
@@ -773,7 +773,7 @@ export async function settingsScreen() {
       </select>
       <select name="brandKey" class="field" style="flex:2; min-width:180px;">
         <option value="">Nenhum/Outro (Marca)</option>
-        ${SUPPORTED_BRANDS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
+        ${SUPPORTED_BANKS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
       </select>
       <input type="color" name="colorHex" value="#666666" title="Cor padrão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
       <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
@@ -809,14 +809,19 @@ export async function settingsScreen() {
           <option value="">Conta Padrão Adicional...</option>
           ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
         </select>
+        <select name="brandKey" class="field" style="flex:2; min-width:180px;">
+          <option value="">Nenhum/Outro (Marca)</option>
+          ${SUPPORTED_CARDS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
+        </select>
         <input type="color" name="colorHex" value="#17a2b8" title="Cor padrão do Cartão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
         <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
       </div>
     </form>
     <div class="small">Cadastrados: ${cards.length}</div>
     ${renderList("cards", cards, c => `
-      ${esc(c.name)} <span class="small">(${esc(c.currency)})</span><br/>
-      <span class="small">
+      <span style="display:inline-block; width:12px; height:12px; background:${esc(c.colorHex || '#17a2b8')}; border-radius:50%; margin-right:5px; vertical-align:middle;"></span>
+      ${esc(c.name)} <span class="small">(${esc(c.currency)}) ${c.brandKey ? '[' + getBrandIcon(c.brandKey) + ']' : ''}</span><br/>
+      <span class="small" style="margin-left:22px; display:inline-block;">
         Fecha dia ${esc(c.closingDay)} · Vence dia ${esc(c.dueDay)}<br/>
         Titular: ${esc(c.holder)} ${(c.defaultAccountMain ? `(Conta: ${accounts.find(a => a.id === c.defaultAccountMain)?.name || '?'})` : "")}
         ${c.additional ? `<br/>Adicional: ${esc(c.additional)} ${(c.defaultAccountAdditional ? `(Conta: ${accounts.find(a => a.id === c.defaultAccountAdditional)?.name || '?'})` : "")}` : ""}
@@ -1410,6 +1415,7 @@ export async function wireSettingsHandlers(rootEl) {
     const additional = e.target.additional.value.trim();
     const defaultAccountMain = e.target.defaultAccountMain.value;
     const defaultAccountAdditional = e.target.defaultAccountAdditional.value;
+    const brandKey = e.target.brandKey?.value || "";
     const colorHex = e.target.colorHex?.value || "#17a2b8";
 
     await put("cards", {
@@ -1418,6 +1424,7 @@ export async function wireSettingsHandlers(rootEl) {
       holder, additional: additional || null,
       defaultAccountMain: defaultAccountMain || null,
       defaultAccountAdditional: defaultAccountAdditional || null,
+      brandKey: brandKey || null,
       colorHex
     });
     e.target.reset();

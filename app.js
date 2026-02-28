@@ -3,7 +3,7 @@ import { settingsScreen, wireSettingsHandlers, renderBudgetDetailsModal, showToa
 import { drawLineChart, drawGroupedBarChart, exportChartToPNG, getCanvasClickPosition } from "./utils/charts.js";
 import { txScreen, wireTxHandlers } from "./screens/tx.js";
 import { invoiceScreen, wireInvoiceHandlers } from "./screens/invoice.js";
-import { importScreen, wireImportHandlers } from "./screens/import.js";
+import { importScreen, wireImportHandlers } from "./screens/import.js?v=2.2";
 import { installmentsScreen, wireInstallmentsHandlers } from "./screens/installments.js";
 import { reportsScreen, wireReportsHandlers } from "./screens/reports.js";
 import { billsScreen, wireBillsHandlers } from "./screens/bills.js";

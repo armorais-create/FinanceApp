@@ -6,12 +6,12 @@ export const BRAND_MAP = {
     inter: { icon: "🟧", colorHex: "#FF7A00" },
     c6: { icon: "⚫", colorHex: "#242424" },
     bb: { icon: "🟨", colorHex: "#F2D300" },
-    wise: { icon: "🟦", colorHex: "#9FE870" }, // Wise bright green/yellowish or blue if preferred. Let's stick to user request "🟦"
-    caixa: { icon: "🔵", colorHex: "#005CA9" },
-    btg: { icon: "🟦", colorHex: "#002B5E" },
-    xp: { icon: "🟡", colorHex: "#FFC20E" },
-    santander: { icon: "🔴", colorHex: "#EC0000" },
-    bradesco: { icon: "🔴", colorHex: "#CC092F" },
+    wise: { icon: "🟢", colorHex: "#00B9FF" }, // User requested green icon for Wise
+    mercadopago: { icon: "🟦", colorHex: "#009EE3" },
+    picpay: { icon: "🟢", colorHex: "#11C76F" },
+    nomad: { icon: "🟡", colorHex: "#F2D800" },
+    sicoob: { icon: "🟢", colorHex: "#00AE9D" },
+    latampass: { icon: "🔴", colorHex: "#E51A2E" },
     default: { icon: "🏦", colorHex: "#6c757d" }
 };
 
@@ -30,16 +30,28 @@ export function getBrandColor(brandKey, fallbackHex = null) {
 }
 
 // Export the array of supported keys for UI dropdowns
-export const SUPPORTED_BRANDS = [
-    { key: "nubank", label: "Nubank" },
-    { key: "itau", label: "Itaú" },
-    { key: "inter", label: "Inter" },
-    { key: "c6", label: "C6 Bank" },
+export const SUPPORTED_BANKS = [
     { key: "bb", label: "Banco do Brasil" },
+    { key: "itau", label: "Itaú" },
+    { key: "nubank", label: "Nubank" },
+    { key: "c6", label: "C6 Bank" },
+    { key: "mercadopago", label: "Mercado Pago" },
+    { key: "picpay", label: "PicPay" },
+    { key: "nomad", label: "Nomad" },
     { key: "wise", label: "Wise" },
-    { key: "caixa", label: "Caixa" },
-    { key: "btg", label: "BTG Pactual" },
-    { key: "xp", label: "XP Investimentos" },
-    { key: "santander", label: "Santander" },
-    { key: "bradesco", label: "Bradesco" }
+    { key: "sicoob", label: "Sicoob" },
+    { key: "inter", label: "Inter" }
+];
+
+export const SUPPORTED_CARDS = [
+    { key: "bb", label: "Banco do Brasil" },
+    { key: "itau", label: "Itaú" },
+    { key: "nubank", label: "Nubank" },
+    { key: "c6", label: "C6 Bank" },
+    { key: "mercadopago", label: "Mercado Pago" },
+    { key: "latampass", label: "Latam Pass" },
+    { key: "nomad", label: "Nomad" },
+    { key: "wise", label: "Wise" },
+    { key: "sicoob", label: "Sicoob" },
+    { key: "inter", label: "Inter" }
 ];
