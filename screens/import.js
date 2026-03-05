@@ -69,7 +69,9 @@ const state = {
         invoiceMonth: new Date().toISOString().slice(0, 7), // YYYY-MM
         cardHolder: "main", // Titular or Additional
         descFallback: "memo", // "memo" | "name" | "both"
-        relaxedDedup: false
+        relaxedDedup: false,
+        fxRate: null,
+        isUSD: false
     },
 
     // Cache for dropdowns
@@ -162,6 +164,7 @@ function resetState() {
     state.file = null;
     state.rows = [];
     state.importSessionId = uid("imp");
+    state.mappingInfo = null;
     // Keep dest and cache
 }
 
@@ -175,10 +178,10 @@ function renderDispatcher(container) {
     try {
         switch (state.step) {
             case 1: renderStep1(container); break;
+            case 1.5: renderStepMapping(container); break; // NEW: Column Mapping UI
             case 2: renderStep2(container); break;
             case 3: renderStepBatchReview(container); break; // NEW
-            case 4: renderStepDestination(container); break; // Was Step 3
-            case 5: renderStepProcessing(container); break;  // Was Step 4
+            case 4: renderStepProcessing(container); break;  // Was Step 5
             default: container.innerHTML = "Passo desconhecido.";
         }
     } catch (e) {
@@ -193,13 +196,13 @@ function renderDispatcher(container) {
 
 function renderStep1(cnt) {
     cnt.innerHTML = `
-        <h3>1. Selecionar Arquivo</h3>
+        <h3>1. Selecionar Arquivo e Destino</h3>
         
         <div class="form grid" style="margin-bottom: 20px;">
             <label>O que você vai importar?
                 <select id="selImportType">
-                    <option value="card" ${state.dest.importType === 'card' ? 'selected' : ''}>Cartão de Crédito (CSV/Excel/PDF)</option>
-                    <option value="account" ${state.dest.importType === 'account' ? 'selected' : ''}>Extrato de Conta (OFX/QIF)</option>
+                    <option value="card" ${state.dest.importType === 'card' ? 'selected' : ''}>Cartão de Crédito (Fatura): CSV/XLSX/PDF/OFX</option>
+                    <option value="account" ${state.dest.importType === 'account' ? 'selected' : ''}>Conta Bancária (Extrato): OFX/CSV/XLSX/PDF</option>
                 </select>
             </label>
         </div>
@@ -213,10 +216,22 @@ function renderStep1(cnt) {
              </label>
         </div>
 
-        <p class="small" id="uploadTip">Suporta CSV, Excel (XLSX) e PDF (Extratos bancários).</p>
+        <div id="cardConfigArea" class="form grid" style="margin-bottom: 20px; display: none;">
+            <label>Cartão de Crédito (Obrigatório)
+                <select id="selDestCard">
+                    <option value="">-- Selecione um cartão --</option>
+                    ${state.cache.cards.map(c => `<option value="${c.id}" ${state.dest.cardId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join("")}
+                </select>
+            </label>
+            <label>Mês da Fatura (Obrigatório)
+                <input type="month" id="selDestMonth" value="${state.dest.invoiceMonth}" required>
+            </label>
+        </div>
+
+        <p class="small" id="uploadTip">Selecione o destino acima para saber quais formatos são suportados.</p>
         
         <div class="form" style="border: 2px dashed #ccc; padding:20px; text-align:center;">
-            <input type="file" id="fiUpload" accept=".csv,.xlsx,.xls,.pdf" style="display:none" />
+            <input type="file" id="fiUpload" accept=".csv,.xlsx,.xls,.pdf,.ofx,.qif" style="display:none" />
             <button id="btnChoose" style="font-size:1.2em; padding:10px 20px;">📂 Escolher Arquivo</button>
             <div id="fileName" style="margin-top:10px; color:#666;"></div>
         </div>
@@ -232,18 +247,23 @@ function renderStep1(cnt) {
     const btnNext = cnt.querySelector("#btnNext1");
     const selImportType = cnt.querySelector("#selImportType");
     const selDestAccount = cnt.querySelector("#selDestAccount");
+    const selDestCard = cnt.querySelector("#selDestCard");
+    const selDestMonth = cnt.querySelector("#selDestMonth");
     const accountConfigArea = cnt.querySelector("#accountConfigArea");
+    const cardConfigArea = cnt.querySelector("#cardConfigArea");
     const uploadTip = cnt.querySelector("#uploadTip");
 
     function updateUploadUI() {
         if (selImportType.value === "account") {
             accountConfigArea.style.display = "block";
-            uploadTip.textContent = "Selecione um arquivo OFX ou QIF do seu banco.";
-            fi.accept = ".ofx,.qif";
+            cardConfigArea.style.display = "none";
+            uploadTip.textContent = "Extrato da Conta. Suporta: OFX, CSV, Excel (XLSX), PDF.";
+            fi.accept = ".ofx,.qif,.csv,.xlsx,.xls,.pdf";
         } else {
             accountConfigArea.style.display = "none";
-            uploadTip.textContent = "Suporta CSV, Excel (XLSX) e PDF (Extratos bancários).";
-            fi.accept = ".csv,.xlsx,.xls,.pdf";
+            cardConfigArea.style.display = "block";
+            uploadTip.textContent = "Fatura do Cartão. Suporta: CSV, Excel (XLSX), PDF, OFX.";
+            fi.accept = ".csv,.xlsx,.xls,.pdf,.ofx";
         }
     }
 
@@ -257,9 +277,9 @@ function renderStep1(cnt) {
         btnNext.disabled = true;
     };
 
-    selDestAccount.onchange = (e) => {
-        state.dest.accountId = e.target.value;
-    };
+    selDestAccount.onchange = (e) => state.dest.accountId = e.target.value;
+    selDestCard.onchange = (e) => state.dest.cardId = e.target.value;
+    selDestMonth.onchange = (e) => state.dest.invoiceMonth = e.target.value;
 
     updateUploadUI();
 
@@ -267,10 +287,11 @@ function renderStep1(cnt) {
         if (state.dest.importType === "account" && !state.dest.accountId) {
             return alert("Por favor, selecione a Conta de Destino antes de anexar o arquivo.");
         }
+        if (state.dest.importType === "card" && (!state.dest.cardId || !state.dest.invoiceMonth)) {
+            return alert("Por favor, preencha o Cartão e Mês da Fatura antes de anexar o arquivo.");
+        }
         fi.click();
     };
-
-    btnChoose.onclick = () => fi.click();
 
     fi.onchange = (e) => {
         const f = e.target.files[0];
@@ -296,11 +317,24 @@ function renderStep1(cnt) {
                     try {
                         const result = await importer.parseFile(state.file, {
                             accountId: state.dest.importType === "account" ? state.dest.accountId : null,
-                            password: pwd
+                            password: pwd,
+                            forceMapping: state._forceMapping,
+                            pdfStrategy: state._pdfStrategy
                         });
+                        state._forceMapping = false; // Reset it immediately
+                        state._pdfStrategy = null; // Reset it immediately
                         retry = false;
 
-                        console.log(`[IMPORT][CSV] Parsed rows length: ${result.rows.length}`);
+                        console.log(`[IMPORT][CSV] Parsed rows length: ${result.length === undefined ? 'Obj' : result.rows.length}`);
+
+                        // Handle Mapping Required
+                        if (result.mappingRequired) {
+                            state.mappingInfo = result;
+                            state.step = 1.5;
+                            renderDispatcher(cnt);
+                            return;
+                        }
+
                         if (result.rows.length === 0) {
                             throw new Error("Nenhum item encontrado. Verifique se o arquivo é válido.");
                         }
@@ -376,6 +410,192 @@ function renderStep1(cnt) {
 }
 
 /* =========================================
+   STEP 1.5: MAPEAR COLUNAS (Manual)
+   ========================================= */
+
+function renderStepMapping(cnt) {
+    const mi = state.mappingInfo;
+
+    cnt.innerHTML = `
+        <h3>⚠️ Identificação de Colunas Requerida</h3>
+        <p>A extração automática identificou baixa confiança neste arquivo. Por favor, ajuste as regras abaixo para continuar.</p>
+        <div id="mappingUiArea"></div>
+    `;
+
+    const area = cnt.querySelector("#mappingUiArea");
+
+    if (mi.fileType === 'pdf') {
+        if (mi.isImageOrEmpty) {
+            area.innerHTML = `
+                <div style="background:#f8d7da; color:#721c24; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #f5c6cb;">
+                    <h4 style="margin-top:0;">⚠️ PDF sem texto detectável</h4>
+                    <p>Não consegui encontrar nenhuma transação neste arquivo. É provável que este PDF seja uma <b>imagem digitalizada</b> ou tenha um formato ilegível de texto.</p>
+                    <p>Por favor, tente exportar o extrato bancário em formato <b>CSV</b> ou <b>OFX</b> e importe novamente.</p>
+                </div>
+                <div style="margin-top:20px; text-align:right">
+                     <button class="secondary" id="btnCancelMap">Voltar / Cancelar</button>
+                </div>
+            `;
+            cnt.querySelector("#btnCancelMap").onclick = () => {
+                resetState();
+                renderDispatcher(cnt);
+            };
+            return;
+        }
+
+        const validSamples = (mi.samples || []).filter(line => (line || "").trim() !== "");
+        const headerSamples = (mi.headerSamples || []).filter(line => (line || "").trim() !== "");
+
+        area.innerHTML = `
+            <div style="background:#d4edda; padding:10px; border-radius:4px; margin-bottom:15px; font-size:12px; border:1px solid #c3e6cb;">
+                <strong style="color:#155724;">✅ Exemplos de TRANSAÇÕES detectadas (para mapear):</strong><br/>
+                <ul style="margin:5px 0 0 20px; color:#155724;">
+                    ${validSamples.map(line => `<li><pre style="margin:0; font-family:monospace;">${esc(line)}</pre></li>`).join("")}
+                </ul>
+            </div>
+
+            ${headerSamples.length > 0 ? `
+            <details style="background:#e2e3e5; padding:10px; border-radius:4px; margin-bottom:15px; font-size:12px; border:1px solid #d6d8db; cursor:pointer;">
+                <summary><strong>Ver linhas de Cabeçalho ignoradas (Debug)</strong></summary>
+                <ul style="margin:10px 0 0 20px; color:#383d41;">
+                    ${headerSamples.map(line => `<li><pre style="margin:0; font-family:monospace;">${esc(line)}</pre></li>`).join("")}
+                </ul>
+            </details>` : ''}
+            
+            <div class="form grid">
+                <label>Estratégia para extrair DESCRIÇÃO
+                    <select id="selPdfStrategy">
+                        <option value="largest_letters">Maior bloco de texto e letras (Padrão/Heurística)</option>
+                        <option value="after_compra">Texto após palavras como "Compra", "Pagamento"</option>
+                        <option value="left_of_value">Texto associado antes do valor (Heurística Fallback)</option>
+                    </select>
+                </label>
+            </div>
+            
+            <div style="margin-top:20px; text-align:right">
+                 <button class="secondary" id="btnCancelMap">Cancelar Importação</button>
+                 <button id="btnSaveMap" class="primary">Aplicar Estratégia »</button>
+            </div>
+        `;
+
+        cnt.querySelector("#btnCancelMap").onclick = () => {
+            resetState();
+            renderDispatcher(cnt);
+        };
+
+        cnt.querySelector("#btnSaveMap").onclick = async () => {
+            state._pdfStrategy = cnt.querySelector("#selPdfStrategy").value;
+            state.step = 1;
+            state.mappingInfo = null;
+            renderDispatcher(cnt);
+            setTimeout(() => {
+                const btn = document.getElementById("btnNext1");
+                if (btn) btn.click();
+            }, 100);
+        };
+
+    } else {
+        // TABULAR FORMAT (CSV / XLSX)
+        const headers = mi.headers.map(h => String(h).trim());
+
+        // Help generate selects
+        const mkSelect = (id, label) => `
+            <label>${label}
+                <select id="${id}" style="width:100%">
+                    <option value="-1">-- Selecione --</option>
+                    ${headers.map((h, i) => `<option value="${i}">${esc(h) || `[Coluna ${i + 1}]`}</option>`).join("")}
+                </select>
+            </label>
+        `;
+
+        area.innerHTML = `
+            <div style="background:#fff3cd; padding:10px; border-radius:4px; margin-bottom:15px; font-size:12px; border:1px solid #ffeeba;">
+                <strong>Amostra dos Dados (Primeiras 3 linhas):</strong><br/>
+                <table style="width:100%; border-collapse: collapse; margin-top:5px;">
+                    <thead>
+                        <tr style="background:#e9ecef;">
+                            ${headers.map((h, i) => `<th style="border:1px solid #ccc; padding:4px;">${esc(h) || `Col ${i}`}</th>`).join("")}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${mi.samples.map(row => `
+                            <tr>
+                                ${row.map(cell => `<td style="border:1px solid #ccc; padding:4px;">${esc(String(cell))}</td>`).join("")}
+                            </tr>
+                        `).join("")}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                ${mkSelect('mapDate', 'Coluna de Data <span style="color:red">*</span>')}
+                ${mkSelect('mapDesc', 'Coluna de Descrição <span style="color:red">*</span>')}
+                ${mkSelect('mapVal', 'Coluna de Valor (Geral)')}
+            </div>
+            
+            <p style="margin-top:10px; font-size:12px; color:#666;">Se o extrato não possui coluna "Valor" e separa em "Débito" e "Crédito", não preencha a coluna Valor e use os campos abaixo:</p>
+            
+            <div class="form grid" style="grid-template-columns: 1fr 1fr; gap: 15px; background:#f9f9f9; padding:10px; border-radius:4px;">
+                ${mkSelect('mapDebit', 'Coluna Débito/Saída (-) (Opcional)')}
+                ${mkSelect('mapCredit', 'Coluna Crédito/Entrada (+) (Opcional)')}
+            </div>
+
+            <div class="form grid" style="grid-template-columns: 1fr 1fr; gap: 15px; margin-top:15px; background:#f9f9f9; padding:10px; border-radius:4px;">
+                ${mkSelect('mapName', 'Coluna Nome/Titular (Opcional)')}
+                ${mkSelect('mapLast4', 'Coluna Final do Cartão (Opcional)')}
+            </div>
+
+            <div style="margin-top:20px; text-align:right">
+                 <button class="secondary" id="btnCancelMap\">Cancelar Importação</button>
+                 <button id="btnSaveMap" class="primary">Aplicar e Continuar »</button>
+            </div>
+        `;
+
+        cnt.querySelector("#btnCancelMap").onclick = () => {
+            resetState();
+            renderDispatcher(cnt);
+        };
+
+        cnt.querySelector("#btnSaveMap").onclick = async () => {
+            const idxDate = parseInt(cnt.querySelector("#mapDate").value);
+            const idxDesc = parseInt(cnt.querySelector("#mapDesc").value);
+            const idxVal = parseInt(cnt.querySelector("#mapVal").value);
+            const idxDebit = parseInt(cnt.querySelector("#mapDebit").value);
+            const idxCredit = parseInt(cnt.querySelector("#mapCredit").value);
+            const idxName = parseInt(cnt.querySelector("#mapName").value);
+            const idxLast4 = parseInt(cnt.querySelector("#mapLast4").value);
+
+            if (idxDate === -1 || idxDesc === -1) {
+                return alert("Data e Descrição são obrigatórios.");
+            }
+            if (idxVal === -1 && idxDebit === -1 && idxCredit === -1) {
+                return alert("Você precisa mapear a coluna Valor, OU pelo menos uma das colunas (Débito/Crédito).");
+            }
+
+            const mapConf = { idxDate, idxDesc, idxVal, idxDebit, idxCredit, idxName, idxLast4 };
+
+            try {
+                // Save mapping for next time
+                const key = `import_mapping_${state.dest.importType}_${mi.hash}`;
+                await put("settings", { id: key, value: mapConf });
+                console.log("Saved mapping to settings:", key);
+            } catch (e) { console.warn("Could not save mapping", e); }
+
+            // Resume Import Flow
+            state.step = 1;
+            state.mappingInfo = null;
+            renderDispatcher(cnt);
+
+            // Wait for DOM
+            setTimeout(() => {
+                cnt.querySelector("#btnNext1").click(); // Auto proceed
+            }, 100);
+        };
+    }
+}
+
+
+/* =========================================
    STEP 2: PREVIEW & EDIT (The Optimized Table)
    ========================================= */
 
@@ -402,6 +622,7 @@ function renderStep2(cnt) {
         <div style="display:flex; justify-content:space-between; align-items:center;">
              <h3>2. Pré-visualização (${state.rows.length} itens)</h3>
              <div class="small">
+                <button id="btnForceMapping" style="margin-right: 15px; font-size: 11px; padding: 2px 6px; background: #fff3cd; color: #856404; border: 1px solid #ffeeba; border-radius: 3px; cursor: pointer;">✏️ Corrigir Colunas / Mapear Manualmente</button>
                 <span id="invalidValuesCount" style="color:red; font-weight:bold; margin-right:15px; display:none;"></span>
                 <label><input type="checkbox" id="chkAll" checked> Selecionar Todos</label>
              </div>
@@ -467,6 +688,24 @@ function renderStep2(cnt) {
 
     // --- HANDLERS ---
 
+    const btnForce = cnt.querySelector("#btnForceMapping");
+    if (btnForce) {
+        if (!state.file.name.match(/\.(csv|xlsx|xls|pdf)$/i)) {
+            btnForce.style.display = "none";
+        } else {
+            btnForce.onclick = () => {
+                state._forceMapping = true;
+                // Go back to step 1 and trigger load
+                state.step = 1;
+                renderDispatcher(cnt);
+                setTimeout(() => {
+                    const bNext = document.getElementById("btnNext1");
+                    if (bNext) bNext.click();
+                }, 100);
+            };
+        }
+    }
+
     cnt.querySelector(".backBtn").onclick = () => {
         if (confirm("Voltar descartará esta importação. Confirmar?")) {
             state.step = 1;
@@ -485,7 +724,29 @@ function renderStep2(cnt) {
         // Force nulls to 0 before saving if they decided to continue
         state.rows.forEach(r => { if (r.selected && r.value === null) r.value = 0; });
 
-        state.step = 3;
+        // Check if there are USD transactions that require an FX rate
+        let needsFx = false;
+        if (state.dest.importType === "card") {
+            const c = state.cache.cards.find(x => x.id === state.dest.cardId);
+            if (c && c.currency === "USD") needsFx = true;
+        } else {
+            if (state.rows.some(r => r.selected && r.currency === "USD")) needsFx = true;
+        }
+
+        if (needsFx) {
+            const fxStr = prompt("As transações envolvem Dólar (USD). Por favor, informe a cotação do dólar para conversão (ex: 5.50):", state.dest.fxRate || "");
+            if (fxStr === null) return; // Cancelled
+            const fx = parseFloat(fxStr);
+            if (!isNaN(fx) && fx > 0) {
+                state.dest.fxRate = fx;
+                state.dest.isUSD = true;
+            } else {
+                alert("Taxa inválida. As transações podem não ser convertidas corretamente.");
+            }
+        }
+
+        // Jump straight to Process (Step 4) since we removed Destination step
+        state.step = 4;
         renderDispatcher(cnt);
     };
 
@@ -514,15 +775,18 @@ function renderStep2(cnt) {
             tr.className = r.warnings.length ? "warning-row" : "";
             if (r.warnings.length) tr.title = r.warnings.join("\n");
 
-            // Auto-classification indicator (Phase 16A-1 ML Trust Score)
+            // Auto-classification indicator (Phase 16A-1 ML Trust / Heuristics)
             let autoBadge = "";
-            let rowColor = "";
-            if (r.confidence === 'alta') {
-                autoBadge = `<span title="Confiança Alta (Regra exata aplicada)" style="color:white; background:green; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">★ ALTA</span>`;
-            } else if (r.confidence === 'media') {
-                autoBadge = `<span title="Confiança Média (Sugerido pelo Histórico)" style="color:white; background:#ff9800; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">💡 MÉDIA</span>`;
+            let confidence = typeof r.confidence === 'number' ? r.confidence : 100; // default 100 for legacy plugins
+
+            if (confidence >= 75) {
+                autoBadge = `<span title="Confiança Alta (Heurística)" style="color:white; background:green; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">★ ALTA</span>`;
+            } else if (confidence >= 40) {
+                autoBadge = `<span title="Confiança Média (Sugerimos Revisar)" style="color:white; background:#ff9800; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">💡 MÉDIA</span>`;
+                tr.style.backgroundColor = "#fffde7"; // light yellow
             } else {
-                autoBadge = `<span title="Confiança Baixa (Nova Despesa / Desconhecida)" style="color:#999; border:1px solid #ccc; padding:1px 4px; border-radius:3px; font-size:9px; vertical-align:middle;">BAIXA</span>`;
+                autoBadge = `<span title="Confiança Baixa (Detecção Heurística Falhou)" style="color:white; background:#f44336; padding:1px 4px; border-radius:3px; font-weight:bold; font-size:9px; vertical-align:middle;">⚠️ BAIXA</span>`;
+                tr.style.backgroundColor = "#ffebee"; // highlight red
             }
 
             const catOptions = genOpts(state.cache.categories, r.categoryId);
@@ -538,7 +802,7 @@ function renderStep2(cnt) {
                     <div style="margin-top:2px;">
                         ${autoBadge} 
                         ${r.appliedRules && r.appliedRules.length ? `<span style="font-size:10px; color:#555;">(Regra aplicada)</span>` : ''}
-                        ${state.dest.importType === 'card' && (r.cardName || r.last4) ? `<div style="font-size:10px; color:#666; margin-top:2px;">Cartão: ${r.last4 ? '****'+r.last4 : 'N/A'} • Nome: ${esc(r.cardName || 'N/D')}</div>` : ''}
+                        ${state.dest.importType === 'card' && (r.cardName || r.last4) ? `<div style="font-size:10px; color:#666; margin-top:2px;">Cartão: ${r.last4 ? '****' + r.last4 : 'N/A'} • Nome: ${esc(r.cardName || 'N/D')}</div>` : ''}
                     </div>
                 </td>
                 <td><input type="number" step="0.01" class="rowVal smallInput ${r.value === null ? 'error-input' : ''}" data-idx="${i}" value="${r.value === null ? '' : r.value}" placeholder="0.00" style="width:100%; box-sizing:border-box;"></td>
@@ -783,7 +1047,7 @@ function renderStepBatchReview(cnt) {
 
         <div style="margin-top:20px; text-align:right; display:flex; gap:10px; justify-content:flex-end;">
             <button class="backBtn" style="background:#888;">« Voltar (Seleção)</button>
-            <button class="nextBtn">Próximo: Destino »</button>
+            <button class="nextBtn" style="background:#28a745; color:white; font-weight:bold;">CONFIRMAR E PROCESSAR »</button>
         </div>
 
         <!-- NEW RULE MODAL (Phase 16A-1) -->
@@ -827,7 +1091,29 @@ function renderStepBatchReview(cnt) {
         if (state.rows.filter(r => r.selected).length === 0) {
             return alert("Nenhum item selecionado para importação.");
         }
-        state.step = 4;
+
+        let needsFx = false;
+        if (state.dest.importType === "card") {
+            const c = state.cache.cards.find(x => x.id === state.dest.cardId);
+            if (c && c.currency === "USD") needsFx = true;
+        } else {
+            if (state.rows.some(r => r.selected && r.currency === "USD")) needsFx = true;
+        }
+
+        if (needsFx) {
+            const fxStr = prompt("As transações envolvem Dólar (USD). Por favor, informe a cotação do dólar para conversão (ex: 5.50):", state.dest.fxRate || "");
+            if (fxStr === null) return; // Cancelled
+            const fx = parseFloat(fxStr);
+            if (!isNaN(fx) && fx > 0) {
+                state.dest.fxRate = fx;
+                state.dest.isUSD = true;
+            } else {
+                alert("Taxa inválida. As transações não serão convertidas.");
+                return;
+            }
+        }
+
+        state.step = 4; // Step 4 is Processing
         renderDispatcher(cnt);
     };
 
@@ -1052,171 +1338,7 @@ function renderBatchPreviewRows() {
 }
 
 /* =========================================
-   STEP 4: DESTINATION (Renamed from Step 3)
-   ========================================= */
-
-function renderStepDestination(cnt) {
-    // Totals
-    const selected = state.rows.filter(r => r.selected);
-    const totalVal = selected.reduce((sum, r) => sum + r.value, 0);
-
-    let destFormFields = "";
-    if (state.dest.importType === "card") {
-        destFormFields = `
-            <div class="form grid">
-                <label>Cartão de Crédito (Obrigatório)
-                    <select id="dstCard" required>
-                        <option value="">-- Selecione --</option>
-                        ${state.cache.cards.map(c => `<option value="${c.id}" ${state.dest.cardId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join("")}
-                    </select>
-                </label>
-                
-                <label>Mês da Fatura (Obrigatório)
-                    <input type="month" id="dstMonth" value="${state.dest.invoiceMonth}" required>
-                </label>
-
-                <label>Portador Padrão (Se não definido na linha)
-                     <select id="dstHolder">
-                        <option value="main" ${state.dest.cardHolder === 'main' ? 'selected' : ''}>Titular</option>
-                        <option value="additional" ${state.dest.cardHolder === 'additional' ? 'selected' : ''}>Adicional</option>
-                     </select>
-                </label>
-            </div>
-            <div class="form grid" style="margin-top:10px;">
-                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Faturas Internacionais)
-                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
-                </label>
-            </div>
-        `;
-    } else {
-        const destAcc = state.cache.accounts.find(a => a.id === state.dest.accountId);
-
-        destFormFields = `
-            <div class="form grid">
-                <label>Conta de Destino Selecionada
-                    <select id="dstAccount" disabled>
-                        <option value="${destAcc ? destAcc.id : ''}">${destAcc ? `${getBrandIcon(destAcc.brandKey)} ${esc(destAcc.name)}` : '---'}</option>
-                    </select>
-                </label>
-            </div>
-            <!-- If we detect USD in OFX, we can ask for FX Rate here too for the full OFX -->
-            <div class="form grid" style="margin-top:10px;">
-                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Contas Internacionais)
-                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
-                </label>
-            </div>
-            <p class="small" style="color:#666; margin-top:5px;">Esta configuração foi definida no Passo 1 (Extrato OFX/QIF).</p>
-        `;
-    }
-
-    cnt.innerHTML = `
-        <h3>4. Destino da Importação</h3>
-        <p>Você selecionou <strong>${selected.length}</strong> transações.</p>
-        <p>Valor Total: <strong style="${totalVal < 0 ? 'color:red' : 'color:green'}">R$ ${totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
-
-        <div class="card" style="background:#f9f9f9; padding:15px; border:1px solid #ddd;">
-            ${destFormFields}
-                
-                <label>Mês da Fatura (Obrigatório)
-                    <input type="month" id="dstMonth" value="${state.dest.invoiceMonth}" required>
-                </label>
-
-                <label>Portador Padrão (Se não definido na linha)
-                     <select id="dstHolder">
-                        <option value="main" ${state.dest.cardHolder === 'main' ? 'selected' : ''}>Titular</option>
-                        <option value="additional" ${state.dest.cardHolder === 'additional' ? 'selected' : ''}>Adicional</option>
-                     </select>
-                </label>
-            </div>
-            <div class="form grid" style="margin-top:10px;">
-                <label id="wrapperFxRate" style="display:none; background:#e1f0fa; padding:10px; border-radius:4px; border:1px solid #bee5eb;">Taxa USD (Opcional p/ Faturas Internacionais)
-                     <input type="number" id="dstFxRate" step="0.0001" placeholder="Ex: 5.50" value="${state.dest.fxRate || ''}" style="width:100px; margin-top:5px;"/>
-                </label>
-            </div>
-        </div>
-
-        <div style="margin-top:20px; text-align:right; display:flex; gap:10px; justify-content:flex-end;">
-            <button class="backBtn" style="background:#888;">« Voltar</button>
-            <button class="nextBtn" style="background:#28a745; color:white; font-weight:bold;">CONFIRMAR E PROCESSAR »</button>
-        </div>
-    `;
-
-    const wrpFx = cnt.querySelector("#wrapperFxRate");
-
-    if (state.dest.importType === "card") {
-        const dstCard = cnt.querySelector("#dstCard");
-
-        // Check initial state
-        const initC = state.cache.cards.find(x => x.id === dstCard.value);
-        if (initC && initC.currency === "USD") wrpFx.style.display = "block";
-
-        dstCard.onchange = () => {
-            const c = state.cache.cards.find(x => x.id === dstCard.value);
-            if (c && c.currency === "USD") {
-                wrpFx.style.display = "block";
-            } else {
-                wrpFx.style.display = "none";
-                cnt.querySelector("#dstFxRate").value = "";
-            }
-        };
-    } else {
-        // For accounts, check if any row has currency mapping needed
-        const hasUSD = state.rows.some(r => r.selected && r.currency === "USD");
-        if (hasUSD) {
-            wrpFx.style.display = "block";
-        }
-    }
-
-    cnt.querySelector(".backBtn").onclick = () => {
-        if (state.dest.importType === "card") {
-            state.dest.cardId = cnt.querySelector("#dstCard").value;
-            state.dest.invoiceMonth = cnt.querySelector("#dstMonth").value;
-            state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
-        }
-        state.step = 3; // Go back to Batch Review
-        renderDispatcher(cnt);
-    };
-
-    cnt.querySelector(".nextBtn").onclick = () => {
-        if (state.dest.importType === "card") {
-            const cardId = cnt.querySelector("#dstCard").value;
-            const mon = cnt.querySelector("#dstMonth").value;
-
-            if (!cardId || !mon) return alert("Por favor, preencha Cartão e Mês da Fatura.");
-
-            state.dest.cardId = cardId;
-            state.dest.invoiceMonth = mon;
-            state.dest.cardHolder = cnt.querySelector("#dstHolder").value;
-
-            const c = state.cache.cards.find(x => x.id === cardId);
-            if (c && c.currency === "USD") {
-                const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
-                state.dest.fxRate = isNaN(fx) ? null : fx;
-                state.dest.isUSD = true;
-            } else {
-                state.dest.fxRate = null;
-                state.dest.isUSD = false;
-            }
-        } else {
-            // Account destination parameters
-            const hasUSD = state.rows.some(r => r.selected && r.currency === "USD");
-            if (hasUSD) {
-                const fx = parseFloat(cnt.querySelector("#dstFxRate").value);
-                state.dest.fxRate = isNaN(fx) ? null : fx;
-                state.dest.isUSD = true; // Signals that there are USD conversions to be done
-            } else {
-                state.dest.fxRate = null;
-                state.dest.isUSD = false;
-            }
-        }
-
-        state.step = 5; // Go to Processing
-        renderDispatcher(cnt);
-    };
-}
-
-/* =========================================
-   STEP 5: PROCESSING (Renamed from Step 4)
+   STEP 4: PROCESSING (Renamed from Step 5)
    ========================================= */
 
 function renderStepProcessing(cnt) {
@@ -1333,7 +1455,7 @@ async function startImportProcess(cnt) {
                         title: `Ref: ${finalTx.description}`,
                         role: 'owed_to_me',
                         borrowerPersonId: row.personId,
-                        lenderPersonId: "", 
+                        lenderPersonId: "",
                         principal: absoluteValue,
                         currency: finalTx.currency,
                         startDate: finalTx.date,
@@ -1359,7 +1481,7 @@ async function startImportProcess(cnt) {
                             createdAt: loan.createdAt
                         };
                         await put("loan_installments", inst);
-                    } catch(er) {
+                    } catch (er) {
                         console.warn("Could not auto-create debt receivable", er);
                     }
                 }
