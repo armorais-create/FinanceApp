@@ -306,24 +306,26 @@ input[type="radio"] {
 
 .iconBtnEdit {
     color: var(--primary);
-    background: #f8f9fa;
-    border-color: var(--border);
+    background: #e9ecef;
+    border-color: #ced4da;
+    border-radius: 6px;
 }
 
 .iconBtnEdit:hover {
-    background: #e2e6ea;
-    border-color: #dae0e5;
+    background: #dde2e6;
+    border-color: #c5cbd3;
 }
 
 .iconBtnDel {
     color: var(--danger);
-    background: #fdf2f2;
-    border-color: #f7d7d7;
+    background: #ffe6e6;
+    border-color: #ffcccc;
+    border-radius: 6px;
 }
 
 .iconBtnDel:hover {
-    background: #f9e1e1;
-    border-color: #f1baba;
+    background: #ffcccc;
+    border-color: #ffb3b3;
 }
 
 .list {
@@ -410,6 +412,106 @@ button.secondary {
 .toast-warning {
     background: var(--warning);
     color: #111;
+}
+
+/* BADGES (Settings) */
+.badge-icon {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    color: white;
+    flex-shrink: 0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Shapes */
+.shape-circle {
+    border-radius: 50%;
+}
+
+.shape-square {
+    border-radius: 4px;
+}
+
+.shape-rounded {
+    border-radius: 8px;
+}
+
+.shape-diamond {
+    transform: rotate(45deg);
+    font-size: 9px;
+}
+
+.shape-diamond::first-letter {
+    display: inline-block;
+    transform: rotate(-45deg);
+}
+
+.shape-triangle {
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    border-radius: 0;
+    align-items: flex-end;
+    padding-bottom: 2px;
+}
+
+.shape-hex {
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    border-radius: 0;
+}
+
+/* Colors Palette */
+.bg-red-1 {
+    background-color: #ef5350;
+}
+
+.bg-red-2 {
+    background-color: #b71c1c;
+}
+
+.bg-purple-1 {
+    background-color: #ab47bc;
+}
+
+.bg-purple-2 {
+    background-color: #4a148c;
+}
+
+.bg-blue-1 {
+    background-color: #42a5f5;
+}
+
+.bg-blue-2 {
+    background-color: #0d47a1;
+}
+
+.bg-green-1 {
+    background-color: #66bb6a;
+}
+
+.bg-green-2 {
+    background-color: #1b5e20;
+}
+
+.bg-yellow-1 {
+    background-color: #fbc02d;
+    color: #000;
+    text-shadow: none;
+}
+
+.bg-yellow-2 {
+    background-color: #f57f17;
+}
+
+.bg-gray-1 {
+    background-color: #bdbdbd;
+}
+
+.bg-gray-2 {
+    background-color: #424242;
 }
 
 /* REJANE REPORT PRINT STYLES */

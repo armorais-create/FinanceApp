@@ -56,9 +56,18 @@ export async function prepareExportPack() {
   }
 }
 
+export function renderBadge({ colorKey, shapeKey, text }) {
+  const txt = (text || "").substring(0, 2).toUpperCase();
+  const c = colorKey || 'gray-1';
+  const s = shapeKey || 'circle';
+  return `<div class="badge-icon bg-${esc(c)} shape-${esc(s)}" title="${esc(txt)}">${esc(txt)}</div>`;
+}
+
 export async function settingsScreen() {
   try {
-    const people = await list("people");
+    const peopleRaw = await list("people");
+    const people = peopleRaw.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+    const banks = await list("banks");
     const accounts = await list("accounts");
     const cards = await list("cards");
     const categories = await list("categories");
@@ -764,69 +773,180 @@ export async function settingsScreen() {
   </div>
 
   <div class="card">
-    <div><strong>Contas</strong></div>
-    <form id="accountForm" class="form" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-      <input name="name" class="field" placeholder="Nome (ex: Nubank, Wise)" required style="flex:2; min-width:150px;" />
-      <select name="currency" class="field-sm" required style="flex:1;">
-        <option value="BRL">BRL</option>
-        <option value="USD">USD</option>
+    <div><strong>Bancos</strong></div>
+    <form id="bankForm" class="form" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+      <input name="name" class="field" placeholder="Nome (ex: Nubank)" required style="flex:2; min-width:150px;" />
+      <select name="badgeColorKey" class="field" required style="flex:1; min-width:100px;">
+        <option value="red-1">Vermelho 1</option>
+        <option value="red-2">Vermelho 2</option>
+        <option value="purple-1">Roxo 1</option>
+        <option value="purple-2">Roxo 2</option>
+        <option value="blue-1">Azul 1</option>
+        <option value="blue-2">Azul 2</option>
+        <option value="green-1">Verde 1</option>
+        <option value="green-2">Verde 2</option>
+        <option value="yellow-1">Amarelo 1</option>
+        <option value="yellow-2">Amarelo 2</option>
+        <option value="gray-1">Cinza 1</option>
+        <option value="gray-2">Cinza 2</option>
       </select>
-      <select name="brandKey" class="field" style="flex:2; min-width:180px;">
-        <option value="">Nenhum/Outro (Marca)</option>
-        ${SUPPORTED_BANKS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
+      <select name="badgeShapeKey" class="field" required style="flex:1; min-width:100px;">
+        <option value="circle">Círculo</option>
+        <option value="square">Quadrado</option>
+        <option value="rounded">Arredondado</option>
+        <option value="diamond">Diamante</option>
+        <option value="triangle">Triângulo</option>
+        <option value="hex">Hexágono</option>
       </select>
-      <input type="color" name="colorHex" value="#666666" title="Cor padrão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
       <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
     </form>
-    <div class="small">Cadastradas: ${accounts.length}</div>
-    ${renderList("accounts", accounts, a => `
-      <span style="display:inline-block; width:12px; height:12px; background:${esc(a.colorHex || '#666666')}; border-radius:50%; margin-right:5px; vertical-align:middle;"></span>
-      ${esc(a.name)} <span class="small">(${esc(a.currency)}) ${a.brandKey ? '[' + getBrandIcon(a.brandKey) + ']' : ''}</span>
+    <div class="small">Cadastrados: ${banks.length}</div>
+    ${renderList("banks", banks, b => `
+      <div style="display:flex; align-items:center; gap:8px;">
+        ${renderBadge({ colorKey: b.badgeColorKey, shapeKey: b.badgeShapeKey, text: b.name })}
+        <span>${esc(b.name)}</span>
+      </div>
     `)}
   </div>
 
   <div class="card">
-    <div><strong>Cartões (Titular + Adicional)</strong></div>
-    <form id="cardForm" class="form" style="display:flex; flex-direction:column; gap:10px;">
+    <div><strong>Contas</strong></div>
+    <form id="accountForm" class="form" style="display:flex; flex-direction:column; gap:10px;">
       <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-        <input name="name" class="field" placeholder="Nome (ex: Amex, Visa)" required style="flex:2; min-width:150px;" />
+        <input name="name" class="field" placeholder="Nome da conta" required style="flex:2; min-width:150px;" />
         <select name="currency" class="field-sm" required style="flex:1;">
           <option value="BRL">BRL</option>
           <option value="USD">USD</option>
         </select>
-        <input name="holder" class="field" placeholder="Titular (ex: André)" required style="flex:2; min-width:120px;" />
-        <input name="closingDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia fecha. (1-28)" required style="flex:1;" />
-        <input name="dueDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia venc. (1-28)" required style="flex:1;" />
+        <select name="bankId" class="field" required style="flex:2; min-width:150px;">
+          <option value="">Banco...</option>
+          ${banks.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join("")}
+        </select>
+        <select name="personId" class="field" required style="flex:2; min-width:150px;">
+          <option value="">Dado do Titular da Conta...</option>
+          ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
+        </select>
       </div>
-      
       <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-        <select name="defaultAccountMain" class="field" style="flex:2; min-width:150px;">
-          <option value="">Conta Padrão Titular...</option>
-          ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
+        <select name="accountType" class="field" required style="flex:1; min-width:150px;" onchange="this.form.investSubtype.style.display = this.value === 'investment' ? 'inline-block' : 'none'">
+          <option value="checking">Conta Corrente</option>
+          <option value="investment">Investimento</option>
         </select>
-        <input name="additional" class="field" placeholder="Adicional (ex: Jessica) — opcional" style="flex:2; min-width:120px;" />
-        <select name="defaultAccountAdditional" class="field" style="flex:2; min-width:150px;">
-          <option value="">Conta Padrão Adicional...</option>
-          ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
+        <select name="investSubtype" class="field" style="flex:1; min-width:150px; display:none;">
+          <option value="">Subtipo de Investimento...</option>
+          <option value="Caixinha">Caixinha</option>
+          <option value="CDI">CDI</option>
+          <option value="CDB">CDB</option>
+          <option value="Outro">Outro</option>
         </select>
-        <select name="brandKey" class="field" style="flex:2; min-width:180px;">
-          <option value="">Nenhum/Outro (Marca)</option>
-          ${SUPPORTED_CARDS.map(b => `<option value="${b.key}">${getBrandIcon(b.key)} ${b.label}</option>`).join("")}
-        </select>
-        <input type="color" name="colorHex" value="#17a2b8" title="Cor padrão do Cartão" style="width:40px; height:40px; padding:0; cursor:pointer; border:1px solid #ccc; border-radius:8px; flex-shrink:0;" />
         <button type="submit" class="btn btn-primary" style="flex-shrink:0;">Adicionar</button>
       </div>
     </form>
+    <div class="small">Cadastradas: ${accounts.length}</div>
+    ${renderList("accounts", accounts, a => {
+      const b = banks.find(x => x.id === a.bankId);
+      const p = people.find(x => x.id === a.personId);
+      const bankName = b ? b.name : "(Definir Banco)";
+      const personName = p ? p.name : "(Definir Pessoa)";
+      const typeStr = a.accountType === 'investment' ? `Investimento${a.investSubtype ? '/' + a.investSubtype : ''}` : `Conta Corrente`;
+      return `
+      <div style="display:flex; align-items:center; gap:8px;">
+        ${b ? renderBadge({ colorKey: b.badgeColorKey, shapeKey: b.badgeShapeKey, text: b.name }) : '<div class="badge-icon bg-gray-1 shape-circle" title="?">?</div>'}
+        <div style="display:flex; flex-direction:column;">
+          <strong>${esc(a.name)}</strong>
+          <span class="small" style="color:#666;">${esc(bankName)} • ${esc(personName)} • ${typeStr} • ${esc(a.currency)}</span>
+        </div>
+      </div>
+      `;
+    })}
+  </div>
+
+  <div class="card">
+    <div><strong>Cartões (Titular + Adicionais)</strong></div>
+    <select id="hiddenAccountSelect" style="display:none;">
+      <option value="">Nenhuma conta padrão...</option>
+      ${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join("")}
+    </select>
+    <form id="cardForm" class="form" style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+        <input name="name" class="field" placeholder="Nome do Cartão" required style="flex:2; min-width:150px;" />
+        <select name="currency" class="field-sm" required style="flex:1;">
+          <option value="BRL">BRL</option>
+          <option value="USD">USD</option>
+        </select>
+        <select name="badgeColorKey" class="field-sm" required style="flex:1;">
+            <option value="purple-1">Roxo 1</option>
+            <option value="purple-2">Roxo 2</option>
+            <option value="red-1">Vermelho 1</option>
+            <option value="red-2">Vermelho 2</option>
+            <option value="blue-1">Azul 1</option>
+            <option value="blue-2">Azul 2</option>
+            <option value="green-1">Verde 1</option>
+            <option value="green-2">Verde 2</option>
+            <option value="yellow-1">Amarelo 1</option>
+            <option value="yellow-2">Amarelo 2</option>
+            <option value="gray-1">Cinza 1</option>
+            <option value="gray-2">Cinza 2</option>
+        </select>
+        <select name="badgeShapeKey" class="field-sm" required style="flex:1;">
+            <option value="square">Quadrado</option>
+            <option value="circle">Círculo</option>
+            <option value="rounded">Arredondado</option>
+            <option value="diamond">Diamante</option>
+            <option value="triangle">Triângulo</option>
+            <option value="hex">Hexágono</option>
+        </select>
+        <input name="closingDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia fecha." required style="flex:1;" />
+        <input name="dueDay" class="field-sm" type="number" min="1" max="28" placeholder="Dia venc." required style="flex:1;" />
+      </div>
+      
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start;">
+        <div style="flex:1; min-width:200px; border:1px solid #ddd; padding:10px; border-radius:4px; background:#fafafa;">
+           <strong>Titular do Cartão</strong><br/>
+           <select name="mainPersonId" class="field card-person-select" style="width:100%; margin-top:5px;" required>
+             <option value="">Selecione Titular...</option>
+             ${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
+           </select>
+        </div>
+        <div style="flex:1; min-width:200px; border:1px solid #ddd; padding:10px; border-radius:4px; background:#fafafa;">
+           <strong>Adicionais (Opcional)</strong><br/>
+           <div class="small" style="max-height:80px; overflow-y:auto; margin-top:5px; display:flex; flex-direction:column; gap:4px;">
+             ${people.map(p => `
+               <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                 <input type="checkbox" name="additionalPersonIds" value="${p.id}" data-name="${esc(p.name)}" class="card-person-check" /> ${esc(p.name)}
+               </label>
+             `).join("")}
+           </div>
+        </div>
+      </div>
+
+      <div id="cardPaymentSetupContainer" style="border:1px solid #eee; padding:10px; border-radius:4px; display:none;">
+          <strong class="small">Conta padrão para pagar fatura de cada portador (Opcional):</strong>
+          <div id="cardPaymentSetupList" style="display:flex; flex-direction:column; gap:5px; margin-top:5px;"></div>
+      </div>
+      <button type="submit" class="btn btn-primary" style="align-self:flex-start;">Adicionar Cartão</button>
+    </form>
     <div class="small">Cadastrados: ${cards.length}</div>
-    ${renderList("cards", cards, c => `
-      <span style="display:inline-block; width:12px; height:12px; background:${esc(c.colorHex || '#17a2b8')}; border-radius:50%; margin-right:5px; vertical-align:middle;"></span>
-      ${esc(c.name)} <span class="small">(${esc(c.currency)}) ${c.brandKey ? '[' + getBrandIcon(c.brandKey) + ']' : ''}</span><br/>
-      <span class="small" style="margin-left:22px; display:inline-block;">
-        Fecha dia ${esc(c.closingDay)} · Vence dia ${esc(c.dueDay)}<br/>
-        Titular: ${esc(c.holder)} ${(c.defaultAccountMain ? `(Conta: ${accounts.find(a => a.id === c.defaultAccountMain)?.name || '?'})` : "")}
-        ${c.additional ? `<br/>Adicional: ${esc(c.additional)} ${(c.defaultAccountAdditional ? `(Conta: ${accounts.find(a => a.id === c.defaultAccountAdditional)?.name || '?'})` : "")}` : ""}
-      </span>
-    `)}
+    ${renderList("cards", cards, c => {
+      const mainName = people.find(p => p.id === c.mainPersonId)?.name || c.legacyHolderName || "(Sem Titular)";
+      const addsIds = Array.isArray(c.additionalPersonIds) ? c.additionalPersonIds : [];
+      const addNames = addsIds.map(pid => people.find(p => p.id === pid)?.name || "?").join(", ");
+      const legacyAddStr = c.legacyAdditionalName ? ` [Legado: ${c.legacyAdditionalName}]` : '';
+      const allAdds = addNames + legacyAddStr;
+
+      return `
+      <div style="display:flex; align-items:center; gap:10px;">
+        ${renderBadge({ colorKey: c.badgeColorKey, shapeKey: c.badgeShapeKey, text: c.name })}
+        <div style="display:flex; flex-direction:column;">
+          <strong>${esc(c.name)}</strong> <span class="small">(${esc(c.currency)})</span>
+          <span class="small" style="color:#666;">
+            Fecha dia ${esc(c.closingDay)} · Vence dia ${esc(c.dueDay)}<br/>
+            Titular: ${esc(mainName)} ${allAdds ? `· Adicionais: ${esc(allAdds)}` : ""}
+          </span>
+        </div>
+      </div>
+      `;
+    })}
   </div>
   
   <div style="text-align: center; color: #999; margin: 25px 0 10px 0; font-size: 0.9em;">
@@ -1387,51 +1507,129 @@ export async function wireSettingsHandlers(rootEl) {
     await refreshSettings(rootEl);
   });
 
+  // Bancos
+  rootEl.querySelector("#bankForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = e.target.elements.id?.value || uid("b");
+    const name = e.target.name.value.trim();
+    const badgeColorKey = e.target.badgeColorKey.value;
+    const badgeShapeKey = e.target.badgeShapeKey.value;
+    if (!name) return;
+    await put("banks", { id, name, badgeColorKey, badgeShapeKey, createdAt: e.target.dataset.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
+    e.target.reset();
+    if (e.target.elements.id) e.target.elements.id.value = "";
+    await refreshSettings(rootEl);
+  });
+
   // Contas
   rootEl.querySelector("#accountForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const id = e.target.elements.id?.value || uid("a");
     const name = e.target.name.value.trim();
     const currency = e.target.currency.value;
-    const brandKey = e.target.brandKey.value;
-    const colorHex = e.target.colorHex.value;
+    const bankId = e.target.bankId.value || null;
+    const personId = e.target.personId.value || null;
+    const accountType = e.target.accountType.value;
+    const investSubtype = accountType === 'investment' ? (e.target.investSubtype.value || null) : null;
+
     if (!name) return;
-    await put("accounts", { id, name, currency, brandKey: brandKey || null, colorHex: colorHex || null });
+    await put("accounts", {
+      id, name, currency, bankId, personId, accountType, investSubtype,
+      createdAt: e.target.dataset.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
     e.target.reset();
     if (e.target.elements.id) e.target.elements.id.value = "";
-    e.target.colorHex.value = "#666666";
+    e.target.investSubtype.style.display = "none";
     await refreshSettings(rootEl);
   });
 
   // Cartões
-  rootEl.querySelector("#cardForm")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const id = e.target.elements.id?.value || uid("c");
-    const name = e.target.name.value.trim();
-    const currency = e.target.currency.value;
-    const closingDay = Number(e.target.closingDay.value);
-    const dueDay = Number(e.target.dueDay.value);
-    const holder = e.target.holder.value.trim();
-    const additional = e.target.additional.value.trim();
-    const defaultAccountMain = e.target.defaultAccountMain.value;
-    const defaultAccountAdditional = e.target.defaultAccountAdditional.value;
-    const brandKey = e.target.brandKey?.value || "";
-    const colorHex = e.target.colorHex?.value || "#17a2b8";
+  const cardForm = rootEl.querySelector("#cardForm");
+  if (cardForm) {
+    const mainSel = cardForm.querySelector("[name='mainPersonId']");
+    const addChecks = cardForm.querySelectorAll(".card-person-check");
+    const setupCont = cardForm.querySelector("#cardPaymentSetupContainer");
+    const setupList = cardForm.querySelector("#cardPaymentSetupList");
+    const hiddenAccs = rootEl.querySelector("#hiddenAccountSelect")?.innerHTML || "";
 
-    await put("cards", {
-      id,
-      name, currency, closingDay, dueDay,
-      holder, additional: additional || null,
-      defaultAccountMain: defaultAccountMain || null,
-      defaultAccountAdditional: defaultAccountAdditional || null,
-      brandKey: brandKey || null,
-      colorHex
+    const renderPaymentSetup = () => {
+      let html = "";
+      const pNameMain = mainSel.options[mainSel.selectedIndex]?.text;
+      const pValues = [];
+      if (mainSel.value) pValues.push({ id: mainSel.value, name: pNameMain, type: 'Titular' });
+      addChecks.forEach(cb => {
+        if (cb.checked) pValues.push({ id: cb.value, name: cb.dataset.name, type: 'Adicional' });
+      });
+
+      if (pValues.length === 0) {
+        setupCont.style.display = 'none';
+        return;
+      }
+
+      pValues.forEach(pv => {
+        html += `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:5px;">
+                  <span class="small" style="min-width:100px;">${pv.type}: <strong>${esc(pv.name)}</strong></span>
+                  <select class="field-sm card-payment-dynamic-select" data-person="${pv.id}" style="flex:1;">
+                    ${hiddenAccs}
+                  </select>
+                </div>
+              `;
+      });
+      setupList.innerHTML = html;
+      setupCont.style.display = 'block';
+
+      if (cardForm.dataset.editingPaymentSetup) {
+        try {
+          const savedMap = JSON.parse(cardForm.dataset.editingPaymentSetup);
+          cardForm.querySelectorAll('.card-payment-dynamic-select').forEach(sel => {
+            if (savedMap[sel.dataset.person]) {
+              sel.value = savedMap[sel.dataset.person];
+            }
+          });
+        } catch (e) { }
+      }
+    };
+
+    mainSel.addEventListener("change", renderPaymentSetup);
+    addChecks.forEach(cb => cb.addEventListener("change", renderPaymentSetup));
+
+    cardForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = e.target.elements.id?.value || uid("c");
+      const name = e.target.name.value.trim();
+      const currency = e.target.currency.value;
+      const closingDay = Number(e.target.closingDay.value);
+      const dueDay = Number(e.target.dueDay.value);
+
+      const badgeColorKey = e.target.badgeColorKey.value;
+      const badgeShapeKey = e.target.badgeShapeKey.value;
+      const mainPersonId = e.target.mainPersonId.value;
+
+      const addCheckboxes = Array.from(e.target.querySelectorAll('.card-person-check:checked'));
+      const additionalPersonIds = addCheckboxes.map(cb => cb.value);
+
+      const defaultAccountByPersonId = {};
+      const selects = e.target.querySelectorAll('.card-payment-dynamic-select');
+      selects.forEach(sel => {
+        if (sel.value) defaultAccountByPersonId[sel.dataset.person] = sel.value;
+      });
+
+      await put("cards", {
+        id, name, currency, closingDay, dueDay,
+        badgeColorKey, badgeShapeKey, mainPersonId, additionalPersonIds,
+        defaultAccountByPersonId,
+        createdAt: e.target.dataset.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      e.target.reset();
+      if (e.target.elements.id) e.target.elements.id.value = "";
+      delete e.target.dataset.editingPaymentSetup;
+      setupCont.style.display = "none";
+      await refreshSettings(rootEl);
     });
-    e.target.reset();
-    if (e.target.elements.id) e.target.elements.id.value = "";
-    if (e.target.colorHex) e.target.colorHex.value = "#17a2b8";
-    await refreshSettings(rootEl);
-  });
+  }
 
   // Rules
   const rForm = rootEl.querySelector("#ruleForm");
@@ -1563,6 +1761,7 @@ export async function wireSettingsHandlers(rootEl) {
 
         const configs = {
           "people": { formId: "#personForm" },
+          "banks": { formId: "#bankForm" },
           "accounts": { formId: "#accountForm" },
           "cards": { formId: "#cardForm" },
           "categories": { formId: "#catForm" },
@@ -1584,11 +1783,28 @@ export async function wireSettingsHandlers(rootEl) {
           form.appendChild(idInput);
         }
 
+        if (store === 'cards' && item.defaultAccountByPersonId) {
+          form.dataset.editingPaymentSetup = JSON.stringify(item.defaultAccountByPersonId);
+        } else {
+          delete form.dataset.editingPaymentSetup;
+        }
+
+        if (item.createdAt) form.dataset.createdAt = item.createdAt;
+
         Object.keys(item).forEach(k => {
+          if (Array.isArray(item[k])) {
+            const checkboxes = form.querySelectorAll(`input[type="checkbox"][name='${k}']`);
+            checkboxes.forEach(cb => {
+              cb.checked = item[k].includes(cb.value);
+              cb.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            return;
+          }
           const input = form.querySelector(`[name='${k}']`);
           if (input) {
             if (input.type === 'checkbox') input.checked = item[k];
             else input.value = item[k] || '';
+            input.dispatchEvent(new Event('change', { bubbles: true }));
           }
         });
         idInput.value = item.id;

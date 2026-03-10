@@ -67,7 +67,9 @@ const state = {
         cardId: "",
         accountId: "",
         invoiceMonth: new Date().toISOString().slice(0, 7), // YYYY-MM
-        cardHolder: "main", // Titular or Additional
+        cardHolderRole: "main",
+        cardHolderPersonId: null,
+        cardHolderName: null,
         descFallback: "memo", // "memo" | "name" | "both"
         relaxedDedup: false,
         fxRate: null,
@@ -223,6 +225,10 @@ function renderStep1(cnt) {
                     ${state.cache.cards.map(c => `<option value="${c.id}" ${state.dest.cardId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join("")}
                 </select>
             </label>
+            <label id="lblCardHolder" style="display:none;">Portador (no cartão)
+                <select id="selDestHolder">
+                </select>
+            </label>
             <label>Mês da Fatura (Obrigatório)
                 <input type="month" id="selDestMonth" value="${state.dest.invoiceMonth}" required>
             </label>
@@ -277,11 +283,83 @@ function renderStep1(cnt) {
         btnNext.disabled = true;
     };
 
+    const selDestHolder = cnt.querySelector("#selDestHolder");
+    const lblCardHolder = cnt.querySelector("#lblCardHolder");
+
+    function updateCardHolders() {
+        if (!state.dest.cardId) {
+            lblCardHolder.style.display = "none";
+            return;
+        }
+        const card = state.cache.cards.find(c => c.id === state.dest.cardId);
+        if (!card) return;
+
+        let opts = `<option value="">(Não definido/Geral)</option>`;
+
+        // Titular
+        const main = state.cache.people.find(p => p.id === card.mainPersonId);
+        if (main) {
+            opts += `<option value="main|${main.id}|${esc(main.name)}">Titular: ${esc(main.name)}</option>`;
+            if (!state.dest.cardHolderRole) {
+                state.dest.cardHolderRole = "main";
+                state.dest.cardHolderPersonId = main.id;
+                state.dest.cardHolderName = main.name;
+            }
+        } else if (card.legacyHolderName) {
+            opts += `<option value="main||${esc(card.legacyHolderName)}">Titular: ${esc(card.legacyHolderName)}</option>`;
+        }
+
+        // Adicionais
+        const addIds = card.additionalPersonIds || [];
+        addIds.forEach(id => {
+            const p = state.cache.people.find(x => x.id === id);
+            if (p) opts += `<option value="additional|${p.id}|${esc(p.name)}">Adic.: ${esc(p.name)}</option>`;
+        });
+
+        if (card.legacyAdditionalName) {
+            opts += `<option value="additional||${esc(card.legacyAdditionalName)}">Adic.: ${esc(card.legacyAdditionalName)}</option>`;
+        }
+
+        selDestHolder.innerHTML = opts;
+
+        if (state.dest.cardHolderRole) {
+            const val = `${state.dest.cardHolderRole}|${state.dest.cardHolderPersonId || ''}|${state.dest.cardHolderName || ''}`;
+            const searchOpt = Array.from(selDestHolder.options).find(o => o.value === val);
+            if (searchOpt) {
+                searchOpt.selected = true;
+            } else if (selDestHolder.options.length > 0) {
+                selDestHolder.selectedIndex = 0;
+            }
+        }
+
+        lblCardHolder.style.display = "block";
+        applyHolderSelection();
+    }
+
+    function applyHolderSelection() {
+        const parts = selDestHolder.value.split('|');
+        if (parts.length === 3) {
+            state.dest.cardHolderRole = parts[0] || "main";
+            state.dest.cardHolderPersonId = parts[1] || null;
+            state.dest.cardHolderName = parts[2] || null;
+        } else {
+            state.dest.cardHolderRole = null;
+            state.dest.cardHolderPersonId = null;
+            state.dest.cardHolderName = null;
+        }
+    }
+
+    if (selDestHolder) selDestHolder.onchange = applyHolderSelection;
+
     selDestAccount.onchange = (e) => state.dest.accountId = e.target.value;
-    selDestCard.onchange = (e) => state.dest.cardId = e.target.value;
+    selDestCard.onchange = (e) => {
+        state.dest.cardId = e.target.value;
+        updateCardHolders();
+    };
     selDestMonth.onchange = (e) => state.dest.invoiceMonth = e.target.value;
 
     updateUploadUI();
+    if (state.dest.importType === "card") updateCardHolders();
 
     btnChoose.onclick = () => {
         if (state.dest.importType === "account" && !state.dest.accountId) {
@@ -354,6 +432,13 @@ function renderStep1(cnt) {
                                 if (pm) matchedPersonId = pm.id;
                             }
 
+                            let forcedPersonId = "";
+                            let forcedRole = "main";
+                            if (state.dest.importType === "card") {
+                                forcedPersonId = state.dest.cardHolderPersonId || "";
+                                forcedRole = state.dest.cardHolderRole || "main";
+                            }
+
                             return {
                                 id: r.id,
                                 date: r.dateISO,
@@ -366,8 +451,8 @@ function renderStep1(cnt) {
                                 categoryId: r.categoryId || "",
                                 subcategoryId: r.subcategoryId || "",
                                 cardType: r.cardUsageType || "fisico",
-                                payerRole: r.payerRole || "main",
-                                personId: matchedPersonId,
+                                payerRole: forcedRole,
+                                personId: forcedPersonId || matchedPersonId || r.personId,
                                 accountId: state.dest.importType === "account" ? state.dest.accountId : "",
                                 last4: r.last4,
                                 cardName: r.cardName,
@@ -1443,8 +1528,9 @@ async function startImportProcess(cnt) {
                     billMonth: state.dest.invoiceMonth,
                     cardId: state.dest.cardId,
                     cardType: row.cardType || "fisico",
-                    cardHolder: (row.payerRole === "main" || row.payerRole === "additional")
-                        ? row.payerRole : state.dest.cardHolder
+                    cardHolder: state.dest.cardHolderRole || "main",
+                    holderPersonId: state.dest.cardHolderPersonId || null,
+                    holderName: state.dest.cardHolderName || null
                 };
 
                 // Dívida a Receber Auto-Creation

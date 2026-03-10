@@ -1,7 +1,7 @@
 import { getCache, setCache, clearCache } from "./utils/cache.js";
 
 const DB_NAME = "financeapp";
-const DB_VERSION = 29; // INCREMENTED for Metas de Patrimônio (Wealth Goals)
+const DB_VERSION = 30; // INCREMENTED for Configurações refactoring (Banks, Accounts, Cards)
 const SUPPORTED_BACKUP_VERSION = 1;
 
 // Helper to validate legacy dumps
@@ -47,7 +47,8 @@ const STORES = [
     "investment_boxes",
     "investment_moves",
     "wealth_goals",
-    "wealth_goal_links"
+    "wealth_goal_links",
+    "banks"
 ];
 
 function openDB() {
@@ -289,6 +290,12 @@ function openDB() {
                     console.log("[DB Upgrade] Creating index: by_date on investment_moves");
                     s.createIndex("by_date", "date", { unique: false });
                 }
+            }
+
+            // Bancos
+            if (!db.objectStoreNames.contains("banks")) {
+                console.log("[DB Upgrade] Creating store: banks");
+                db.createObjectStore("banks", { keyPath: "id" });
             }
 
             // Wealth Goals (Metas de Patrimônio)
@@ -645,8 +652,15 @@ export async function runBackgroundMigrations() {
         const storesToMigrate = [];
         if (db.objectStoreNames.contains("transactions")) storesToMigrate.push("transactions");
         if (db.objectStoreNames.contains("loan_installments")) storesToMigrate.push("loan_installments");
+        if (db.objectStoreNames.contains("accounts")) storesToMigrate.push("accounts");
+        if (db.objectStoreNames.contains("cards")) storesToMigrate.push("cards");
 
         if (storesToMigrate.length === 0) return;
+
+        let peopleList = [];
+        if (db.objectStoreNames.contains("people")) {
+            peopleList = await list("people");
+        }
 
         let mutated = false;
         const t = db.transaction(storesToMigrate, "readwrite");
@@ -676,6 +690,91 @@ export async function runBackgroundMigrations() {
                     if (!lRec.dueMonth && lRec.dueDate) {
                         lRec.dueMonth = lRec.dueDate.slice(0, 7);
                         cursor.update(lRec);
+                        mutated = true;
+                    }
+                    cursor.continue();
+                }
+            };
+        }
+
+        const personFinder = (nameToFind) => {
+            if (!nameToFind || typeof nameToFind !== 'string') return null;
+            const target = nameToFind.trim().toLowerCase();
+            const found = peopleList.find(p => p.name.trim().toLowerCase() === target);
+            return found ? found.id : null;
+        };
+
+        if (storesToMigrate.includes("accounts")) {
+            const reqAcc = t.objectStore("accounts").openCursor();
+            reqAcc.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    const aRec = cursor.value;
+                    let changed = false;
+                    if (aRec.accountType === undefined) {
+                        aRec.bankId = null;
+                        aRec.personId = null;
+                        aRec.accountType = "checking";
+                        aRec.investSubtype = null;
+                        changed = true;
+                    }
+                    if (changed) {
+                        cursor.update(aRec);
+                        mutated = true;
+                    }
+                    cursor.continue();
+                }
+            };
+        }
+
+        if (storesToMigrate.includes("cards")) {
+            const reqCard = t.objectStore("cards").openCursor();
+            reqCard.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    const cRec = cursor.value;
+                    let changed = false;
+                    if (cRec.mainPersonId === undefined) {
+                        cRec.mainPersonId = personFinder(cRec.holder) || null;
+                        if (!cRec.mainPersonId && cRec.holder) {
+                            cRec.legacyHolderName = cRec.holder;
+                        }
+
+                        cRec.additionalPersonIds = [];
+                        if (cRec.additional) {
+                            const addList = cRec.additional.split(',').map(s => s.trim()).filter(Boolean);
+                            const legacyAdd = [];
+                            addList.forEach(aname => {
+                                const pid = personFinder(aname);
+                                if (pid) cRec.additionalPersonIds.push(pid);
+                                else legacyAdd.push(aname);
+                            });
+                            if (legacyAdd.length > 0) {
+                                cRec.legacyAdditionalName = legacyAdd.join(', ');
+                            }
+                        }
+
+                        cRec.defaultAccountByPersonId = {};
+                        if (cRec.defaultAccountMain && cRec.mainPersonId) {
+                            cRec.defaultAccountByPersonId[cRec.mainPersonId] = cRec.defaultAccountMain;
+                        }
+                        if (cRec.defaultAccountAdditional && cRec.additionalPersonIds.length > 0) {
+                            cRec.additionalPersonIds.forEach(pid => {
+                                cRec.defaultAccountByPersonId[pid] = cRec.defaultAccountAdditional;
+                            });
+                        }
+
+                        cRec.badgeColorKey = null;
+                        cRec.badgeShapeKey = null;
+
+                        delete cRec.holder;
+                        delete cRec.additional;
+                        delete cRec.defaultAccountMain;
+                        delete cRec.defaultAccountAdditional;
+                        changed = true;
+                    }
+                    if (changed) {
+                        cursor.update(cRec);
                         mutated = true;
                     }
                     cursor.continue();
